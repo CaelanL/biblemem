@@ -17,7 +17,17 @@ const MAPPING = {
   'house.fill': 'home',
   'paperplane.fill': 'send',
   'chevron.left.forwardslash.chevron.right': 'code',
+  'chevron.left': 'arrow-back-ios',
   'chevron.right': 'chevron-right',
+  'chevron.down': 'keyboard-arrow-down',
+  'plus': 'add',
+  'book.fill': 'menu-book',
+  'book.closed': 'book',
+  'mic.fill': 'mic',
+  'xmark': 'close',
+  'checkmark': 'check',
+  'arrow.counterclockwise': 'refresh',
+  'arrow.right': 'arrow-forward',
 } as IconMapping;
 
 /**

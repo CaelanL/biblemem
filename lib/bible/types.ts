@@ -1,0 +1,91 @@
+export interface VerseRef {
+  book: string;
+  chapter: number;
+  verse: number;
+  verseEnd?: number; // for ranges like John 3:16-17
+}
+
+export interface Verse {
+  reference: VerseRef;
+  text: string;
+}
+
+// Book name aliases (handle common variations)
+export const BOOK_ALIASES: Record<string, string> = {
+  // Psalms
+  'psalm': 'Psalms',
+  'ps': 'Psalms',
+  'psa': 'Psalms',
+
+  // Song of Solomon variations
+  'song of solomon': 'Song of Solomon',
+  'song of songs': 'Song of Solomon',
+  'sos': 'Song of Solomon',
+
+  // Common abbreviations
+  'gen': 'Genesis',
+  'ex': 'Exodus',
+  'exod': 'Exodus',
+  'lev': 'Leviticus',
+  'num': 'Numbers',
+  'deut': 'Deuteronomy',
+  'josh': 'Joshua',
+  'judg': 'Judges',
+  'ruth': 'Ruth',
+  '1 sam': '1 Samuel',
+  '2 sam': '2 Samuel',
+  '1 kings': '1 Kings',
+  '2 kings': '2 Kings',
+  '1 chron': '1 Chronicles',
+  '2 chron': '2 Chronicles',
+  'ezra': 'Ezra',
+  'neh': 'Nehemiah',
+  'esth': 'Esther',
+  'job': 'Job',
+  'prov': 'Proverbs',
+  'eccl': 'Ecclesiastes',
+  'isa': 'Isaiah',
+  'jer': 'Jeremiah',
+  'lam': 'Lamentations',
+  'ezek': 'Ezekiel',
+  'dan': 'Daniel',
+  'hos': 'Hosea',
+  'joel': 'Joel',
+  'amos': 'Amos',
+  'obad': 'Obadiah',
+  'jonah': 'Jonah',
+  'mic': 'Micah',
+  'nah': 'Nahum',
+  'hab': 'Habakkuk',
+  'zeph': 'Zephaniah',
+  'hag': 'Haggai',
+  'zech': 'Zechariah',
+  'mal': 'Malachi',
+  'matt': 'Matthew',
+  'mk': 'Mark',
+  'lk': 'Luke',
+  'jn': 'John',
+  'acts': 'Acts',
+  'rom': 'Romans',
+  '1 cor': '1 Corinthians',
+  '2 cor': '2 Corinthians',
+  'gal': 'Galatians',
+  'eph': 'Ephesians',
+  'phil': 'Philippians',
+  'col': 'Colossians',
+  '1 thess': '1 Thessalonians',
+  '2 thess': '2 Thessalonians',
+  '1 tim': '1 Timothy',
+  '2 tim': '2 Timothy',
+  'titus': 'Titus',
+  'phlm': 'Philemon',
+  'heb': 'Hebrews',
+  'jas': 'James',
+  '1 pet': '1 Peter',
+  '2 pet': '2 Peter',
+  '1 jn': '1 John',
+  '2 jn': '2 John',
+  '3 jn': '3 John',
+  'jude': 'Jude',
+  'rev': 'Revelation',
+};
