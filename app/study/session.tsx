@@ -1,24 +1,35 @@
+import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
-import { getSavedVerses, formatVerseReference, updateVerseProgress, type SavedVerse, type Difficulty as StorageDifficulty } from '@/lib/storage';
-import { transcribeAudio } from '@/lib/whisper';
 import { evaluateRecitation, type AlignmentWord } from '@/lib/evaluate';
-import { IconSymbol } from '@/components/ui/icon-symbol';
+import { formatVerseReference, getSavedVerses, updateVerseProgress, type SavedVerse, type Difficulty as StorageDifficulty } from '@/lib/storage';
+import { transcribeAudio } from '@/lib/whisper';
+import { Audio } from 'expo-av';
+import * as Haptics from 'expo-haptics';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
-import { useEffect, useState, useRef, useCallback } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
+  Alert,
+  Dimensions,
+  FlatList,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   View,
-  ActivityIndicator,
-  Dimensions,
-  FlatList,
-  Alert,
   type ViewToken,
 } from 'react-native';
-import * as Haptics from 'expo-haptics';
-import { Audio } from 'expo-av';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withTiming,
+  withRepeat,
+  Easing,
+  FadeIn,
+  SlideInUp,
+  Layout,
+} from 'react-native-reanimated';
 
 type Difficulty = 'easy' | 'medium' | 'hard';
 type RecordingState = 'idle' | 'recording' | 'recorded';
@@ -30,7 +41,51 @@ interface Chunk {
   displayText: string; // May have blanks for medium mode
 }
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
+const CARD_MAX_HEIGHT = SCREEN_HEIGHT * 0.30;
+const RECORDING_BAR_HEIGHT = 56;
+const WAVEFORM_SAMPLES = 40;
+
+// Isolated waveform component - only re-renders when trigger changes
+const Waveform = React.memo(({ dataRef, trigger }: { dataRef: React.MutableRefObject<number[]>; trigger: number }) => {
+  return (
+    <View style={waveformStyles.container}>
+      {Array.from({ length: WAVEFORM_SAMPLES }).map((_, i) => {
+        const dataIndex = dataRef.current.length - (WAVEFORM_SAMPLES - i);
+        const level = dataIndex >= 0 ? dataRef.current[dataIndex] : 0;
+        const baseHeight = 2;
+        const maxHeight = 28;
+        const curved = Math.pow(level, 0.6);
+        const height = baseHeight + (maxHeight - baseHeight) * curved;
+        return (
+          <View
+            key={i}
+            style={[waveformStyles.bar, { height }]}
+          />
+        );
+      })}
+    </View>
+  );
+});
+
+const waveformStyles = StyleSheet.create({
+  container: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+    gap: 1.5,
+    height: 32,
+    marginHorizontal: 8,
+    overflow: 'hidden',
+  },
+  bar: {
+    width: 2,
+    backgroundColor: 'rgba(255,255,255,0.8)',
+    borderRadius: 1,
+    minHeight: 3,
+  },
+});
 
 export default function StudySessionScreen() {
   const { id, difficulty, chunkSize: chunkSizeParam } = useLocalSearchParams<{ id: string; difficulty: Difficulty; chunkSize: string }>();
@@ -53,15 +108,47 @@ export default function StudySessionScreen() {
 
   const flatListRef = useRef<FlatList>(null);
   const recordingRef = useRef<Audio.Recording | null>(null);
+  const meteringRef = useRef<NodeJS.Timeout | null>(null);
+  const waveformDataRef = useRef<number[]>([]); // Store waveform data without causing re-renders
+  const [waveformTrigger, setWaveformTrigger] = useState(0); // Trigger for waveform re-render only
+
+  // Animation: recording bar slides up from bottom
+  const recordingTabY = useSharedValue(RECORDING_BAR_HEIGHT + 60); // Start hidden (below screen)
+  const spinnerRotation = useSharedValue(0);
+
+  const recordingTabStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: recordingTabY.value }],
+  }));
+
+  const spinnerStyle = useAnimatedStyle(() => ({
+    transform: [{ rotate: `${spinnerRotation.value}deg` }],
+  }));
+
+  // Start/stop spinner when transcribing
+  useEffect(() => {
+    if (transcribing) {
+      spinnerRotation.value = withRepeat(
+        withTiming(360, { duration: 1000, easing: Easing.linear }),
+        -1, // infinite
+        false
+      );
+    } else {
+      spinnerRotation.value = 0;
+    }
+  }, [transcribing]);
 
   useEffect(() => {
     loadVerse();
 
-    // Cleanup recording on unmount
+    // Cleanup recording and timer on unmount
     return () => {
       if (recordingRef.current) {
         recordingRef.current.stopAndUnloadAsync().catch(() => {});
         recordingRef.current = null;
+      }
+      if (meteringRef.current) {
+        clearInterval(meteringRef.current);
+        meteringRef.current = null;
       }
     };
   }, [id]);
@@ -224,6 +311,32 @@ export default function StudySessionScreen() {
       await recording.startAsync();
       recordingRef.current = recording;
 
+      // Animate recording bar up
+      recordingTabY.value = withTiming(0, { duration: 300, easing: Easing.out(Easing.cubic) });
+
+      // Start audio level metering - builds scrolling waveform
+      waveformDataRef.current = [];
+      setWaveformTrigger(0);
+      meteringRef.current = setInterval(async () => {
+        if (recordingRef.current) {
+          const status = await recordingRef.current.getStatusAsync();
+          if (status.isRecording && typeof status.metering === 'number') {
+            // Based on testing: silence ~-26dB, talking ~-7 to -13dB
+            const minDb = -26; // silence floor
+            const maxDb = -6;  // loud speech
+            const normalized = Math.max(0, Math.min(1, (status.metering - minDb) / (maxDb - minDb)));
+
+            // Add new sample to ref
+            waveformDataRef.current.push(normalized);
+            if (waveformDataRef.current.length > WAVEFORM_SAMPLES) {
+              waveformDataRef.current = waveformDataRef.current.slice(-WAVEFORM_SAMPLES);
+            }
+            // Trigger waveform component re-render only
+            setWaveformTrigger(t => t + 1);
+          }
+        }
+      }, 50); // ~20 samples per second
+
       setRecordingState('recording');
     } catch (error) {
       console.error('Failed to start recording:', error);
@@ -233,6 +346,16 @@ export default function StudySessionScreen() {
 
   const handleCancel = async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+
+    // Stop metering
+    if (meteringRef.current) {
+      clearInterval(meteringRef.current);
+      meteringRef.current = null;
+    }
+    waveformDataRef.current = [];
+
+    // Animate bar down
+    recordingTabY.value = withTiming(RECORDING_BAR_HEIGHT + 60, { duration: 250, easing: Easing.in(Easing.cubic) });
 
     try {
       if (recordingRef.current) {
@@ -249,6 +372,13 @@ export default function StudySessionScreen() {
   const handleSubmit = async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
+    // Stop metering
+    if (meteringRef.current) {
+      clearInterval(meteringRef.current);
+      meteringRef.current = null;
+    }
+    waveformDataRef.current = [];
+
     if (!recordingRef.current) {
       setRecordingState('idle');
       return;
@@ -256,6 +386,7 @@ export default function StudySessionScreen() {
 
     try {
       setTranscribing(true);
+      // Keep bar up during processing - it will slide down after we get results
 
       // Stop recording and get URI
       await recordingRef.current.stopAndUnloadAsync();
@@ -293,6 +424,9 @@ export default function StudySessionScreen() {
       setChunkTranscriptions((prev) => new Map(prev).set(currentIndex, cleanedTranscription));
       setChunkAlignments((prev) => new Map(prev).set(currentIndex, alignment));
 
+      // Now slide the tab down before showing the result card
+      recordingTabY.value = withTiming(RECORDING_BAR_HEIGHT + 60, { duration: 250, easing: Easing.in(Easing.cubic) });
+
       // Mark as completed
       const newCompleted = new Set([...completedChunks, currentIndex]);
       setCompletedChunks(newCompleted);
@@ -328,6 +462,8 @@ export default function StudySessionScreen() {
       }
     } catch (error) {
       console.error('Transcription failed:', error);
+      // Slide tab down on error
+      recordingTabY.value = withTiming(RECORDING_BAR_HEIGHT + 60, { duration: 250, easing: Easing.in(Easing.cubic) });
       Alert.alert('Error', `Transcription failed: ${error}`);
       setRecordingState('idle');
     } finally {
@@ -503,40 +639,103 @@ export default function StudySessionScreen() {
       }
     };
 
+    const cardBg = isDark ? '#1c1c1e' : '#ffffff';
+
     return (
       <View style={[styles.chunkContainer, { width: SCREEN_WIDTH }]}>
-        <View style={styles.chunkContent}>
-          <Text style={[styles.verseNum, { color: isDark ? '#60a5fa' : colors.tint }]}>
-            {getVerseLabel()}
-          </Text>
-
-          {difficulty === 'hard' ? (
-            <Text style={[styles.hardModeHint, { color: colors.icon }]}>
-              Recite from memory
-            </Text>
-          ) : (
-            <Text style={[styles.chunkText, { color: colors.text }]}>
-              {item.displayText}
-            </Text>
-          )}
-
-          {isCompleted && (
-            <View style={styles.resultContainer}>
-              <Text style={[styles.resultText, { color: score === 100 ? '#22c55e' : '#ef4444' }]}>
-                {score === 100 ? '✓ Good' : '✗ Needs work'}
+        {/* Verse Card */}
+        <Animated.View
+          style={[
+            styles.card,
+            styles.cardShadow,
+            { backgroundColor: cardBg, maxHeight: CARD_MAX_HEIGHT },
+          ]}
+          layout={Layout.duration(300)}
+        >
+          <View style={styles.cardContent}>
+            {/* Reference Badge */}
+            <View style={[styles.referenceBadge, { backgroundColor: isDark ? 'rgba(96,165,250,0.15)' : 'rgba(10,126,164,0.1)' }]}>
+              <IconSymbol name="book.fill" size={14} color={isDark ? '#60a5fa' : colors.tint} />
+              <Text style={[styles.referenceBadgeText, { color: isDark ? '#60a5fa' : colors.tint }]}>
+                {getVerseLabel()}
               </Text>
-              {alignment && alignment.length > 0 ? (
-                <View style={styles.alignmentWrapper}>
-                  {renderAlignment(alignment)}
-                </View>
-              ) : transcription ? (
-                <Text style={[styles.transcriptionText, { color: colors.icon }]}>
-                  "{transcription}"
-                </Text>
-              ) : null}
             </View>
-          )}
-        </View>
+
+            {/* Verse Text */}
+            <ScrollView style={styles.cardScrollContent} contentContainerStyle={styles.verseTextContainer}>
+              {difficulty === 'hard' ? (
+                <View style={styles.hardModeContainer}>
+                  <View style={[styles.hardModeIcon, { backgroundColor: isDark ? 'rgba(96,165,250,0.15)' : 'rgba(10,126,164,0.1)' }]}>
+                    <IconSymbol name="lightbulb.fill" size={28} color={isDark ? '#60a5fa' : colors.tint} />
+                  </View>
+                  <Text style={[styles.hardModeHint, { color: colors.icon }]}>
+                    Recite from memory
+                  </Text>
+                </View>
+              ) : (
+                <Text style={[styles.chunkText, { color: colors.text }]}>
+                  {item.displayText}
+                </Text>
+              )}
+            </ScrollView>
+          </View>
+        </Animated.View>
+
+        {/* Result Card - only shows after completion */}
+        {isCompleted && (() => {
+          // Determine status based on score
+          const status = score && score >= 90 ? 'success' : score && score >= 70 ? 'partial' : 'retry';
+          const statusColors = {
+            success: { bg: isDark ? 'rgba(34,197,94,0.1)' : 'rgba(34,197,94,0.08)', border: 'rgba(34,197,94,0.3)', text: '#22c55e', label: 'Perfect!' },
+            partial: { bg: isDark ? 'rgba(245,158,11,0.1)' : 'rgba(245,158,11,0.08)', border: 'rgba(245,158,11,0.3)', text: '#f59e0b', label: 'Good effort!' },
+            retry: { bg: isDark ? 'rgba(239,68,68,0.1)' : 'rgba(239,68,68,0.08)', border: 'rgba(239,68,68,0.3)', text: '#ef4444', label: 'Try again' },
+          };
+          const statusStyle = statusColors[status];
+          const statusIcon = status === 'success' ? 'checkmark.circle.fill' : status === 'partial' ? 'checkmark.circle' : 'arrow.clockwise';
+
+          return (
+            <Animated.View
+              style={[
+                styles.card,
+                styles.resultCard,
+                {
+                  backgroundColor: statusStyle.bg,
+                  borderColor: statusStyle.border,
+                  maxHeight: CARD_MAX_HEIGHT,
+                },
+              ]}
+              entering={SlideInUp.duration(300)}
+            >
+              <View style={styles.resultCardContent}>
+                {/* Header with status */}
+                <View style={styles.resultCardHeader}>
+                  <View style={styles.resultStatusRow}>
+                    <IconSymbol name={statusIcon as any} size={18} color={statusStyle.text} />
+                    <Text style={[styles.resultStatusLabel, { color: statusStyle.text }]}>
+                      {statusStyle.label}
+                    </Text>
+                  </View>
+                  <View style={[styles.scoreBadge, { backgroundColor: `${statusStyle.text}20` }]}>
+                    <Text style={[styles.scoreBadgeText, { color: statusStyle.text }]}>
+                      {score}% match
+                    </Text>
+                  </View>
+                </View>
+
+                {/* Transcription/Alignment */}
+                <ScrollView style={styles.cardScrollContent} contentContainerStyle={styles.resultScrollInner}>
+                  {alignment && alignment.length > 0 ? (
+                    renderAlignment(alignment)
+                  ) : transcription ? (
+                    <Text style={[styles.transcriptionText, { color: colors.text }]}>
+                      "{transcription}"
+                    </Text>
+                  ) : null}
+                </ScrollView>
+              </View>
+            </Animated.View>
+          );
+        })()}
       </View>
     );
   };
@@ -589,10 +788,10 @@ export default function StudySessionScreen() {
         })}
       />
 
-      {/* Controls - hide on results page */}
+      {/* Controls - Always rendered to preserve layout, content conditionally shown */}
       {currentIndex < chunks.length && (
         <View style={styles.controlsContainer}>
-          {recordingState === 'idle' && !completedChunks.has(currentIndex) && (
+          {recordingState === 'idle' && !transcribing && !completedChunks.has(currentIndex) && (
             <Pressable
               style={[styles.micButton, { backgroundColor: buttonBg }]}
               onPress={handleMicPress}
@@ -601,49 +800,7 @@ export default function StudySessionScreen() {
             </Pressable>
           )}
 
-          {recordingState === 'idle' && completedChunks.has(currentIndex) && (
-            <Pressable
-              style={[styles.nextButton, { backgroundColor: buttonBg }]}
-              onPress={handleNext}
-            >
-              <Text style={styles.nextButtonText}>
-                {completedChunks.size === chunks.length ? 'See Results' : 'Next'}
-              </Text>
-              <IconSymbol name="arrow.right" size={20} color="#fff" />
-            </Pressable>
-          )}
-
-          {recordingState === 'recording' && !transcribing && (
-            <View style={styles.recordingControls}>
-              <Pressable
-                style={[styles.controlButton, { backgroundColor: '#ef4444' }]}
-                onPress={handleCancel}
-              >
-                <IconSymbol name="xmark" size={24} color="#fff" />
-              </Pressable>
-
-              <View style={styles.recordingIndicator}>
-                <View style={[styles.recordingDot, { backgroundColor: '#ef4444' }]} />
-                <Text style={[styles.recordingText, { color: colors.text }]}>Recording...</Text>
-              </View>
-
-              <Pressable
-                style={[styles.controlButton, { backgroundColor: '#22c55e' }]}
-                onPress={handleSubmit}
-              >
-                <IconSymbol name="checkmark" size={24} color="#fff" />
-              </Pressable>
-            </View>
-          )}
-
-          {transcribing && (
-            <View style={styles.recordingIndicator}>
-              <ActivityIndicator size="small" color={colors.tint} />
-              <Text style={[styles.recordingText, { color: colors.text }]}>Transcribing...</Text>
-            </View>
-          )}
-
-          {recordingState === 'recorded' && (
+          {recordingState === 'idle' && !transcribing && completedChunks.has(currentIndex) && (
             <Pressable
               style={[styles.nextButton, { backgroundColor: buttonBg }]}
               onPress={handleNext}
@@ -656,6 +813,39 @@ export default function StudySessionScreen() {
           )}
         </View>
       )}
+
+      {/* Recording Bar - horizontal bar at bottom */}
+      <Animated.View
+        style={[
+          styles.recordingBar,
+          transcribing ? styles.recordingBarProcessing : styles.recordingBarActive,
+          recordingTabStyle,
+        ]}
+      >
+        {transcribing ? (
+          <View style={styles.processingBarContent}>
+            <Animated.View style={[styles.spinner, spinnerStyle]}>
+              <View style={styles.spinnerArc} />
+            </Animated.View>
+            <Text style={styles.processingText}>Analyzing your recitation...</Text>
+          </View>
+        ) : (
+          <View style={styles.recordingBarContent}>
+            {/* Cancel button */}
+            <Pressable onPress={handleCancel} style={styles.barCancelButton}>
+              <IconSymbol name="xmark" size={22} color="rgba(255,255,255,0.8)" />
+            </Pressable>
+
+            {/* Scrolling audio waveform - new data appears right, scrolls left */}
+            <Waveform dataRef={waveformDataRef} trigger={waveformTrigger} />
+
+            {/* Submit button */}
+            <Pressable onPress={handleSubmit} style={styles.barSubmitButton}>
+              <IconSymbol name="checkmark" size={24} color="#fff" />
+            </Pressable>
+          </View>
+        )}
+      </Animated.View>
     </View>
   );
 }
@@ -687,50 +877,137 @@ const styles = StyleSheet.create({
   },
   chunkContainer: {
     flex: 1,
+    padding: 16,
+    gap: 12,
     justifyContent: 'center',
+  },
+  card: {
+    borderRadius: 16,
+    overflow: 'hidden',
+  },
+  resultCard: {
+    borderWidth: 1,
+  },
+  resultCardContent: {
+    padding: 16,
+  },
+  resultCardHeader: {
+    flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  resultStatusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  resultStatusLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  scoreBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  scoreBadgeText: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  resultScrollInner: {
+    paddingBottom: 4,
+  },
+  cardShadow: {
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  cardContent: {
     padding: 20,
   },
-  chunkContent: {
+  referenceBadge: {
+    flexDirection: 'row',
     alignItems: 'center',
-    maxWidth: '90%',
-  },
-  verseNum: {
-    fontSize: 14,
-    fontWeight: '600',
+    alignSelf: 'flex-start',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
     marginBottom: 16,
   },
-  chunkText: {
-    fontSize: 24,
-    lineHeight: 36,
-    textAlign: 'center',
-  },
-  hardModeHint: {
-    fontSize: 18,
-    fontStyle: 'italic',
-  },
-  resultContainer: {
-    marginTop: 20,
-  },
-  resultText: {
-    fontSize: 16,
+  referenceBadgeText: {
+    fontSize: 14,
     fontWeight: '600',
   },
-  transcriptionText: {
-    fontSize: 14,
-    fontStyle: 'italic',
-    marginTop: 8,
-    textAlign: 'center',
-    paddingHorizontal: 20,
+  cardScrollContent: {
+    flexGrow: 0,
   },
-  alignmentWrapper: {
-    marginTop: 12,
-    paddingHorizontal: 20,
+  verseTextContainer: {
+    paddingBottom: 4,
+  },
+  chunkText: {
+    fontSize: 19,
+    lineHeight: 30,
+  },
+  hardModeContainer: {
+    alignItems: 'center',
+    paddingVertical: 24,
+  },
+  hardModeIcon: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  hardModeHint: {
+    fontSize: 16,
+    textAlign: 'center',
+  },
+  // Legacy styles for result card (will be updated)
+  cardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  cardHeaderText: {
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  cardScrollInner: {
+    padding: 16,
+  },
+  transcriptionText: {
+    fontSize: 16,
+    lineHeight: 26,
   },
   alignmentContainer: {
     fontSize: 16,
-    lineHeight: 24,
-    textAlign: 'center',
+    lineHeight: 26,
+  },
+  recordingHeaderContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  recordingCardContent: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 32,
+    paddingVertical: 24,
+  },
+  recordingControlButton: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   controlsContainer: {
     paddingHorizontal: 20,
@@ -766,10 +1043,92 @@ const styles = StyleSheet.create({
     width: 12,
     height: 12,
     borderRadius: 6,
+    backgroundColor: '#ef4444',
   },
   recordingText: {
     fontSize: 16,
     fontWeight: '500',
+  },
+  recordingBar: {
+    position: 'absolute',
+    bottom: 40,
+    left: 20,
+    right: 20,
+    height: 56,
+    borderRadius: 28,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 6,
+  },
+  recordingBarActive: {
+    backgroundColor: '#ef4444',
+  },
+  recordingBarProcessing: {
+    backgroundColor: '#374151',
+  },
+  recordingBarContent: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+  },
+  barCancelButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  barSubmitButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(255,255,255,0.25)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  processingBarContent: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    gap: 12,
+  },
+  spinner: {
+    width: 20,
+    height: 20,
+  },
+  spinnerArc: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    borderWidth: 2.5,
+    borderColor: '#9ca3af',
+    borderTopColor: 'transparent',
+  },
+  processingText: {
+    color: '#9ca3af',
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  recordingTabControls: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 40,
+  },
+  cancelButton: {
+    padding: 12,
+  },
+  submitButton: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   recordedControls: {
     flexDirection: 'row',
