@@ -1,5 +1,8 @@
 const OPENAI_API_KEY = process.env.EXPO_PUBLIC_OPENAI_API_KEY;
 
+// Set to true to use mock data for testing UI
+const USE_MOCK = false;
+
 export interface AlignmentWord {
   word: string;
   status: 'correct' | 'close' | 'wrong' | 'added' | 'missing';
@@ -12,10 +15,44 @@ export interface EvaluationResult {
   alignment: AlignmentWord[];
 }
 
+// Mock function for testing UI
+async function mockEvaluateRecitation(): Promise<EvaluationResult> {
+  // Simulate 3 second loading
+  await new Promise(resolve => setTimeout(resolve, 3000));
+
+  return {
+    cleanedTranscription: "For God so loved the world that he gave his only begotten Son",
+    result: 'good',
+    alignment: [
+      { word: "For", status: "correct" },
+      { word: "God", status: "correct" },
+      { word: "so", status: "correct" },
+      { word: "loved", status: "correct" },
+      { word: "the", status: "correct" },
+      { word: "world", status: "correct" },
+      { word: "that", status: "correct" },
+      { word: "he", status: "correct" },
+      { word: "gave", status: "correct" },
+      { word: "his", status: "correct" },
+      { word: "only", status: "close", expected: "one and only" },
+      { word: "begotten", status: "added" },
+      { word: "Son", status: "correct" },
+      { word: "___", status: "missing", expected: "that" },
+      { word: "___", status: "missing", expected: "whoever" },
+      { word: "___", status: "missing", expected: "believes" },
+    ],
+  };
+}
+
 export async function evaluateRecitation(
   actualVerse: string,
   transcription: string
 ): Promise<EvaluationResult> {
+  // Use mock for testing UI
+  if (USE_MOCK) {
+    return mockEvaluateRecitation();
+  }
+
   if (!OPENAI_API_KEY) {
     throw new Error('OpenAI API key not configured');
   }
@@ -39,15 +76,7 @@ Clean up the raw transcription to get what they MEANT to say:
 
 IMPORTANT: After cleaning, DO NOT change or reinterpret the cleaned transcription in later steps.
 
-STEP 2 - EVALUATE:
-Base your decision ONLY on the cleaned transcription, not the raw transcription.
-- Default to "good" unless clearly missing major portions or is a different verse
-- Minor word mistakes (articles like "the", "a"), small omissions, or synonyms are OK
-- Extra words before or after the verse are OK
-- Respond "bad" ONLY if large portions are missing, the structure is wrong, or meaning is significantly changed
-- Punctuation does not matter
-
-STEP 3 - WORD ALIGNMENT:
+STEP 2 - WORD ALIGNMENT:
 Create a left-to-right alignment at the word level, allowing limited multi-word groupings where specified. The goal is to reflect how a human tutor would mark the attempt, not to maximize string similarity.
 
 For each position, output a JSON object with:
@@ -67,10 +96,10 @@ Rules:
 - Max 2 words can map together for semantic equivalents
 - If a word repeats in the verse, track each occurrence separately
 - Ignore punctuation completely - do not include punctuation as separate items in the alignment
+- Ignore puncuation in comparison. "everyone." == "everyone"
 
 RESPOND IN THIS EXACT FORMAT (three lines):
 CLEANED: <the cleaned transcription>
-RESULT: <good or bad>
 ALIGNMENT: <JSON array>
 
 Do not include explanations, comments, or extra text. If you cannot follow the format exactly, still output the format with best effort.`;
