@@ -1,7 +1,7 @@
 const OPENAI_API_KEY = process.env.EXPO_PUBLIC_OPENAI_API_KEY;
 
 // Set to true to use mock data for testing UI
-const USE_MOCK = false;
+const USE_MOCK = true;
 
 export interface AlignmentWord {
   word: string;
@@ -18,7 +18,7 @@ export interface EvaluationResult {
 // Mock function for testing UI
 async function mockEvaluateRecitation(): Promise<EvaluationResult> {
   // Simulate 3 second loading
-  await new Promise(resolve => setTimeout(resolve, 3000));
+  await new Promise(resolve => setTimeout(resolve, 0));
 
   return {
     cleanedTranscription: "For God so loved the world that he gave his only begotten Son",
