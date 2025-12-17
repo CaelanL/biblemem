@@ -1,0 +1,296 @@
+import type { SavedVerse } from '@/lib/storage';
+
+// ============================================================================
+// Types
+// ============================================================================
+
+export type Difficulty = 'easy' | 'medium' | 'hard';
+
+export interface Chunk {
+  id: string; // Stable ID for FlatList keys
+  verseNum: number;
+  verseNumEnd?: number; // For multi-verse chunks
+  text: string; // Original text (for evaluation)
+  displayText: string; // May have blanks for medium mode
+}
+
+export interface AlignmentWord {
+  word: string;
+  status: 'correct' | 'close' | 'wrong' | 'missing' | 'added';
+  expected?: string; // For 'close', 'wrong', or 'missing' status
+}
+
+// ============================================================================
+// Superscript & Annotation
+// ============================================================================
+
+const SUPERSCRIPTS: Record<string, string> = {
+  '0': '⁰', '1': '¹', '2': '²', '3': '³', '4': '⁴',
+  '5': '⁵', '6': '⁶', '7': '⁷', '8': '⁸', '9': '⁹',
+};
+
+/**
+ * Convert a number to superscript characters
+ */
+export function toSuperscript(num: number): string {
+  return String(num).split('').map(d => SUPERSCRIPTS[d] || d).join('');
+}
+
+/**
+ * Add verse number annotation to text as superscript prefix
+ */
+export function annotateWithVerseNum(text: string, verseNum: number): string {
+  return `${toSuperscript(verseNum)}${text}`;
+}
+
+// ============================================================================
+// Verse Text Extraction
+// ============================================================================
+
+/**
+ * Extract a single verse's text from a combined multi-verse string.
+ * Tries to split by sentence boundaries first, falls back to word count.
+ */
+export function getVerseText(fullText: string, index: number, total: number): string {
+  if (total === 1) return fullText;
+
+  // Try to split by sentence-like boundaries
+  const sentences = fullText.split(/(?<=[.!?])\s+/);
+  if (sentences.length >= total) {
+    return sentences[index] || fullText;
+  }
+
+  // Fallback: split by words
+  const words = fullText.split(' ');
+  const chunkSize = Math.ceil(words.length / total);
+  const start = index * chunkSize;
+  const end = start + chunkSize;
+  return words.slice(start, end).join(' ');
+}
+
+// ============================================================================
+// Difficulty Masking (Deterministic)
+// ============================================================================
+
+/**
+ * Simple seeded random number generator (mulberry32)
+ * Returns a function that produces deterministic values 0-1
+ */
+function seededRandom(seed: number): () => number {
+  return function() {
+    let t = seed += 0x6D2B79F5;
+    t = Math.imul(t ^ t >>> 15, t | 1);
+    t ^= t + Math.imul(t ^ t >>> 7, t | 61);
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+
+/**
+ * Apply difficulty masking to text.
+ * - easy: show full text
+ * - medium: blank ~50% of words (deterministic based on seed)
+ * - hard: show nothing
+ *
+ * @param text - The annotated text to mask
+ * @param difficulty - easy | medium | hard
+ * @param seed - Numeric seed for deterministic blanking (e.g., chunk index)
+ */
+export function applyDifficulty(text: string, difficulty: Difficulty, seed: number = 0): string {
+  if (difficulty === 'easy') return text;
+  if (difficulty === 'hard') return '';
+
+  // Medium: blank out ~50% of words, avoid consecutive blanks
+  const random = seededRandom(seed);
+  const words = text.split(' ');
+  let lastBlanked = false;
+
+  return words.map((word, i) => {
+    // Don't blank if last word was blanked (avoid consecutive)
+    if (lastBlanked) {
+      lastBlanked = false;
+      return word;
+    }
+
+    // ~50% chance to blank, but not first or last word
+    if (i > 0 && i < words.length - 1 && random() < 0.5) {
+      lastBlanked = true;
+      // Replace letters with underscores, keep trailing punctuation
+      const letters = word.replace(/[^a-zA-Z]/g, '');
+      const trailingPunct = word.match(/[^a-zA-Z]+$/)?.[0] || '';
+      return '_'.repeat(letters.length) + trailingPunct;
+    }
+
+    return word;
+  }).join(' ');
+}
+
+// ============================================================================
+// Chunk Parsing
+// ============================================================================
+
+/**
+ * Annotate a full verse range (for when all verses are in one chunk)
+ */
+function annotateVerseRange(fullText: string, startVerse: number, totalVerses: number): string {
+  const parts: string[] = [];
+  for (let i = 0; i < totalVerses; i++) {
+    const verseText = getVerseText(fullText, i, totalVerses);
+    parts.push(annotateWithVerseNum(verseText, startVerse + i));
+  }
+  return parts.join(' ');
+}
+
+/**
+ * Parse a saved verse into chunks for study.
+ * Each chunk gets a stable ID for FlatList keys.
+ *
+ * @param verse - The saved verse to parse
+ * @param difficulty - Difficulty level for display masking
+ * @param chunkSize - Number of verses per chunk
+ * @returns Array of chunks ready for study
+ */
+export function parseVerseIntoChunks(
+  verse: SavedVerse,
+  difficulty: Difficulty,
+  chunkSize: number
+): Chunk[] {
+  const totalVerses = verse.verseEnd - verse.verseStart + 1;
+
+  // If only one verse, return single chunk
+  if (totalVerses === 1) {
+    const annotatedText = annotateWithVerseNum(verse.text, verse.verseStart);
+    const chunkId = `${verse.id}:${verse.verseStart}`;
+    return [{
+      id: chunkId,
+      verseNum: verse.verseStart,
+      text: verse.text,
+      displayText: applyDifficulty(annotatedText, difficulty, hashString(chunkId)),
+    }];
+  }
+
+  // If chunkSize >= totalVerses, return all verses as one chunk
+  if (chunkSize >= totalVerses) {
+    const annotatedText = annotateVerseRange(verse.text, verse.verseStart, totalVerses);
+    const chunkId = `${verse.id}:${verse.verseStart}-${verse.verseEnd}`;
+    return [{
+      id: chunkId,
+      verseNum: verse.verseStart,
+      verseNumEnd: verse.verseEnd,
+      text: verse.text,
+      displayText: applyDifficulty(annotatedText, difficulty, hashString(chunkId)),
+    }];
+  }
+
+  // Get individual verse texts
+  const verseTexts: { verseNum: number; text: string }[] = [];
+  for (let v = verse.verseStart; v <= verse.verseEnd; v++) {
+    const verseText = getVerseText(verse.text, v - verse.verseStart, totalVerses);
+    verseTexts.push({ verseNum: v, text: verseText });
+  }
+
+  // Group verses into chunks based on chunkSize
+  const chunks: Chunk[] = [];
+  for (let i = 0; i < verseTexts.length; i += chunkSize) {
+    const chunkVerses = verseTexts.slice(i, i + chunkSize);
+    const combinedText = chunkVerses.map(v => v.text).join(' ');
+    const annotatedText = chunkVerses
+      .map(v => annotateWithVerseNum(v.text, v.verseNum))
+      .join(' ');
+    const startVerse = chunkVerses[0].verseNum;
+    const endVerse = chunkVerses[chunkVerses.length - 1].verseNum;
+
+    const chunkId = endVerse !== startVerse
+      ? `${verse.id}:${startVerse}-${endVerse}`
+      : `${verse.id}:${startVerse}`;
+
+    chunks.push({
+      id: chunkId,
+      verseNum: startVerse,
+      verseNumEnd: endVerse !== startVerse ? endVerse : undefined,
+      text: combinedText,
+      displayText: applyDifficulty(annotatedText, difficulty, hashString(chunkId)),
+    });
+  }
+
+  return chunks;
+}
+
+// ============================================================================
+// Scoring
+// ============================================================================
+
+/**
+ * Calculate score from a single alignment result
+ */
+export function calculateChunkScore(alignment: AlignmentWord[]): number {
+  let correct = 0, close = 0, wrong = 0, missing = 0, added = 0;
+
+  for (const item of alignment) {
+    if (item.status === 'correct') correct++;
+    else if (item.status === 'close') close++;
+    else if (item.status === 'wrong') wrong++;
+    else if (item.status === 'missing') missing++;
+    else if (item.status === 'added') added++;
+  }
+
+  const denominator = correct + close + wrong + missing + added;
+  return denominator > 0 ? Math.round((correct + close * 0.5) / denominator * 100) : 0;
+}
+
+/**
+ * Calculate final score from all chunk alignments
+ */
+export function calculateFinalScore(allAlignments: Map<number, AlignmentWord[]>): number {
+  let totalCorrect = 0, totalClose = 0, totalWrong = 0, totalMissing = 0, totalAdded = 0;
+
+  allAlignments.forEach((alignment) => {
+    for (const item of alignment) {
+      if (item.status === 'correct') totalCorrect++;
+      else if (item.status === 'close') totalClose++;
+      else if (item.status === 'wrong') totalWrong++;
+      else if (item.status === 'missing') totalMissing++;
+      else if (item.status === 'added') totalAdded++;
+    }
+  });
+
+  const totalDenom = totalCorrect + totalClose + totalWrong + totalMissing + totalAdded;
+  return totalDenom > 0 ? Math.round((totalCorrect + totalClose * 0.5) / totalDenom * 100) : 0;
+}
+
+// ============================================================================
+// Utilities
+// ============================================================================
+
+/**
+ * Simple string hash for generating numeric seeds
+ */
+function hashString(str: string): number {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    const char = str.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash = hash & hash; // Convert to 32bit integer
+  }
+  return Math.abs(hash);
+}
+
+/**
+ * Results page item for FlatList
+ */
+export const RESULTS_PAGE_ID = '__results__';
+
+export interface ResultsPageItem {
+  id: typeof RESULTS_PAGE_ID;
+  isResultsPage: true;
+}
+
+export function createResultsPageItem(): ResultsPageItem {
+  return { id: RESULTS_PAGE_ID, isResultsPage: true };
+}
+
+/**
+ * Type guard for results page item
+ */
+export function isResultsPage(item: Chunk | ResultsPageItem): item is ResultsPageItem {
+  return 'isResultsPage' in item && item.isResultsPage === true;
+}
