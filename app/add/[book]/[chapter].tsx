@@ -27,7 +27,7 @@ interface VerseLayout {
 }
 
 export default function VerseSelectScreen() {
-  const { book, chapter } = useLocalSearchParams<{ book: string; chapter: string }>();
+  const { book, chapter, collectionId } = useLocalSearchParams<{ book: string; chapter: string; collectionId?: string }>();
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
   const isDark = colorScheme === 'dark';
@@ -220,10 +220,15 @@ export default function VerseSelectScreen() {
       verseStart: min,
       verseEnd: max,
       text: texts.join(' '),
-    });
+    }, collectionId);
 
     router.dismissAll();
-    router.replace('/');
+    // Navigate back to the collection if we came from one, otherwise go home
+    if (collectionId) {
+      router.replace(`/collection/${collectionId}`);
+    } else {
+      router.replace('/');
+    }
   };
 
   // ============ RENDER ============
