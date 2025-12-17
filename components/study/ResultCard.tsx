@@ -71,28 +71,61 @@ const customEntering = () => {
   };
 };
 
+// Colors for alignment statuses
+const ALIGNMENT_COLORS = {
+  destructive: '#ef4444', // red for missing
+  warning: '#f59e0b',     // amber for added/close
+};
+
+/**
+ * Renders a single word with appropriate styling based on status
+ */
+function Word({ item, textColor }: { item: AlignmentWord; textColor: string }) {
+  switch (item.status) {
+    case 'correct':
+      return <Text style={{ color: textColor }}>{item.word}</Text>;
+
+    case 'missing':
+      // Red + strikethrough + slight opacity (word user should have said)
+      return (
+        <Text style={styles.missingWord}>
+          {item.word}
+        </Text>
+      );
+
+    case 'added':
+      // Amber + underline (word user said but shouldn't have)
+      return (
+        <Text style={styles.addedWord}>
+          {item.word}
+        </Text>
+      );
+
+    case 'close':
+      // Amber background (future: synonym/near-match)
+      return (
+        <Text style={styles.closeWord}>
+          {item.word}
+        </Text>
+      );
+
+    default:
+      return <Text style={{ color: textColor }}>{item.word}</Text>;
+  }
+}
+
 /**
  * Renders word alignment with color-coded status
  */
 function AlignmentDisplay({ alignment, textColor }: { alignment: AlignmentWord[]; textColor: string }) {
   return (
     <Text style={styles.alignmentContainer}>
-      {alignment.map((item, i) => {
-        let color = textColor; // default/correct
-        if (item.status === 'wrong' || item.status === 'missing') {
-          color = '#ef4444'; // red
-        } else if (item.status === 'close') {
-          color = '#f59e0b'; // yellow/amber
-        } else if (item.status === 'added') {
-          color = '#ef4444'; // red for added too
-        }
-
-        return (
-          <Text key={i} style={{ color }}>
-            {item.word}{i < alignment.length - 1 ? ' ' : ''}
-          </Text>
-        );
-      })}
+      {alignment.map((item, i) => (
+        <Text key={i}>
+          <Word item={item} textColor={textColor} />
+          {i < alignment.length - 1 ? ' ' : ''}
+        </Text>
+      ))}
     </Text>
   );
 }
@@ -195,5 +228,23 @@ const styles = StyleSheet.create({
   transcriptionText: {
     fontSize: 16,
     lineHeight: 26,
+  },
+  // Missing: red + strikethrough + opacity (word user should have said)
+  missingWord: {
+    color: '#ef4444',
+    textDecorationLine: 'line-through',
+    opacity: 0.7,
+  },
+  // Added: amber + underline (word user said but shouldn't have)
+  addedWord: {
+    color: '#f59e0b',
+    textDecorationLine: 'underline',
+  },
+  // Close: amber background (future: synonym/near-match)
+  closeWord: {
+    color: '#f59e0b',
+    backgroundColor: 'rgba(245, 158, 11, 0.2)',
+    borderRadius: 2,
+    paddingHorizontal: 2,
   },
 });

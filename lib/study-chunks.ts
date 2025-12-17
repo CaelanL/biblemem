@@ -16,8 +16,8 @@ export interface Chunk {
 
 export interface AlignmentWord {
   word: string;
-  status: 'correct' | 'close' | 'wrong' | 'missing' | 'added';
-  expected?: string; // For 'close', 'wrong', or 'missing' status
+  status: 'correct' | 'close' | 'missing' | 'added';
+  expected?: string; // For 'close' or 'missing' status
 }
 
 // ============================================================================
@@ -223,17 +223,16 @@ export function parseVerseIntoChunks(
  * Calculate score from a single alignment result
  */
 export function calculateChunkScore(alignment: AlignmentWord[]): number {
-  let correct = 0, close = 0, wrong = 0, missing = 0, added = 0;
+  let correct = 0, close = 0, missing = 0, added = 0;
 
   for (const item of alignment) {
     if (item.status === 'correct') correct++;
     else if (item.status === 'close') close++;
-    else if (item.status === 'wrong') wrong++;
     else if (item.status === 'missing') missing++;
     else if (item.status === 'added') added++;
   }
 
-  const denominator = correct + close + wrong + missing + added;
+  const denominator = correct + close + missing + added;
   return denominator > 0 ? Math.round((correct + close * 0.5) / denominator * 100) : 0;
 }
 
@@ -241,19 +240,18 @@ export function calculateChunkScore(alignment: AlignmentWord[]): number {
  * Calculate final score from all chunk alignments
  */
 export function calculateFinalScore(allAlignments: Map<number, AlignmentWord[]>): number {
-  let totalCorrect = 0, totalClose = 0, totalWrong = 0, totalMissing = 0, totalAdded = 0;
+  let totalCorrect = 0, totalClose = 0, totalMissing = 0, totalAdded = 0;
 
   allAlignments.forEach((alignment) => {
     for (const item of alignment) {
       if (item.status === 'correct') totalCorrect++;
       else if (item.status === 'close') totalClose++;
-      else if (item.status === 'wrong') totalWrong++;
       else if (item.status === 'missing') totalMissing++;
       else if (item.status === 'added') totalAdded++;
     }
   });
 
-  const totalDenom = totalCorrect + totalClose + totalWrong + totalMissing + totalAdded;
+  const totalDenom = totalCorrect + totalClose + totalMissing + totalAdded;
   return totalDenom > 0 ? Math.round((totalCorrect + totalClose * 0.5) / totalDenom * 100) : 0;
 }
 
