@@ -14,8 +14,13 @@ export default function RootLayout() {
 
   return (
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-      <Stack>
+      <Stack
+        screenOptions={{
+          headerBackButtonDisplayMode: 'minimal', // Show only back arrow, no text (iOS)
+        }}
+      >
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+        <Stack.Screen name="collection/[id]" options={{ title: 'Collection' }} />
         <Stack.Screen name="add/index" options={{ title: 'Add Verse' }} />
         <Stack.Screen name="add/[book]/[chapter]" options={{ title: 'Select Verses' }} />
         <Stack.Screen name="study/[id]" options={{ title: 'Setup' }} />

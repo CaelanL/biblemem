@@ -3,7 +3,7 @@ import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { BIBLE_BOOKS, OLD_TESTAMENT_END } from '@/lib/bible/books';
 import { getChapterCount } from '@/lib/bible';
-import { router, Stack } from 'expo-router';
+import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
 import {
   Pressable,
@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 
 export default function AddVerseScreen() {
+  const { collectionId } = useLocalSearchParams<{ collectionId?: string }>();
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
   const [expandedBook, setExpandedBook] = useState<string | null>(null);
@@ -23,7 +24,8 @@ export default function AddVerseScreen() {
   };
 
   const handleChapterPress = (book: string, chapter: number) => {
-    router.push(`/add/${encodeURIComponent(book)}/${chapter}`);
+    const params = collectionId ? `?collectionId=${collectionId}` : '';
+    router.push(`/add/${encodeURIComponent(book)}/${chapter}${params}`);
   };
 
   const renderChapterGrid = (book: string) => {
