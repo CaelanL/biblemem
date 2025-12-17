@@ -89,7 +89,7 @@ export default function StudySetupScreen() {
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <Stack.Screen
         options={{
-          title: 'Study Setup',
+          title: 'Setup',
           headerStyle: { backgroundColor: colors.background },
           headerTintColor: colors.text,
         }}

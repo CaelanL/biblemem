@@ -25,6 +25,8 @@ import Animated, {
   useAnimatedStyle,
   withTiming,
   withRepeat,
+  withDelay,
+  runOnJS,
   Easing,
   FadeIn,
   SlideInUp,
@@ -32,7 +34,7 @@ import Animated, {
 } from 'react-native-reanimated';
 
 type Difficulty = 'easy' | 'medium' | 'hard';
-type RecordingState = 'idle' | 'recording' | 'recorded';
+type RecordingState = 'idle' | 'recording';
 
 interface Chunk {
   verseNum: number;
@@ -43,6 +45,8 @@ interface Chunk {
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const CARD_MAX_HEIGHT = SCREEN_HEIGHT * 0.30;
+// ScrollView max height = card max - badge (~28) - badge margin (16) - padding top (20) - padding bottom (20)
+const SCROLL_MAX_HEIGHT = CARD_MAX_HEIGHT - 28 - 16 - 20 - 20;
 const RECORDING_BAR_HEIGHT = 56;
 const WAVEFORM_SAMPLES = 40;
 
@@ -424,13 +428,21 @@ export default function StudySessionScreen() {
       setChunkTranscriptions((prev) => new Map(prev).set(currentIndex, cleanedTranscription));
       setChunkAlignments((prev) => new Map(prev).set(currentIndex, alignment));
 
-      // Now slide the tab down before showing the result card
-      recordingTabY.value = withTiming(RECORDING_BAR_HEIGHT + 60, { duration: 250, easing: Easing.in(Easing.cubic) });
-
       // Mark as completed
       const newCompleted = new Set([...completedChunks, currentIndex]);
       setCompletedChunks(newCompleted);
-      setRecordingState('recorded');
+      setRecordingState('idle');
+
+      // Slide the tab down, then clear transcribing state after animation completes
+      recordingTabY.value = withTiming(
+        RECORDING_BAR_HEIGHT + 60,
+        { duration: 250, easing: Easing.in(Easing.cubic) },
+        (finished) => {
+          if (finished) {
+            runOnJS(setTranscribing)(false);
+          }
+        }
+      );
 
       // Check if all chunks are done
       if (newCompleted.size === chunks.length) {
@@ -454,20 +466,22 @@ export default function StudySessionScreen() {
           updateVerseProgress(id, difficulty as StorageDifficulty, finalScore);
         }
 
-        // Auto-scroll to results page
-        setTimeout(() => {
-          setShowResults(true);
-          flatListRef.current?.scrollToIndex({ index: chunks.length, animated: true });
-        }, 500);
+        setShowResults(true);
       }
     } catch (error) {
       console.error('Transcription failed:', error);
-      // Slide tab down on error
-      recordingTabY.value = withTiming(RECORDING_BAR_HEIGHT + 60, { duration: 250, easing: Easing.in(Easing.cubic) });
+      // Slide tab down on error, then clear transcribing state
+      recordingTabY.value = withTiming(
+        RECORDING_BAR_HEIGHT + 60,
+        { duration: 250, easing: Easing.in(Easing.cubic) },
+        (finished) => {
+          if (finished) {
+            runOnJS(setTranscribing)(false);
+          }
+        }
+      );
       Alert.alert('Error', `Transcription failed: ${error}`);
       setRecordingState('idle');
-    } finally {
-      setTranscribing(false);
     }
   };
 
@@ -593,6 +607,8 @@ export default function StudySessionScreen() {
               </Pressable>
             </View>
           </View>
+          {/* Empty placeholder to match chunk layout */}
+          <View style={styles.controlsContainer} />
         </View>
       );
     }
@@ -643,12 +659,15 @@ export default function StudySessionScreen() {
 
     return (
       <View style={[styles.chunkContainer, { width: SCREEN_WIDTH }]}>
-        {/* Verse Card */}
-        <Animated.View
+        {/* Cards container */}
+        <View style={styles.cardsArea}>
+          {/* Verse Card */}
+          <Animated.View
           style={[
             styles.card,
             styles.cardShadow,
-            { backgroundColor: cardBg, maxHeight: CARD_MAX_HEIGHT },
+            styles.verseCard,
+            { backgroundColor: cardBg, maxHeight: CARD_MAX_HEIGHT, borderColor: isDark ? 'rgba(96,165,250,0.3)' : 'rgba(10,126,164,0.25)' },
           ]}
           layout={Layout.duration(300)}
         >
@@ -662,7 +681,7 @@ export default function StudySessionScreen() {
             </View>
 
             {/* Verse Text */}
-            <ScrollView style={styles.cardScrollContent} contentContainerStyle={styles.verseTextContainer}>
+            <ScrollView style={[styles.cardScrollContent, { maxHeight: SCROLL_MAX_HEIGHT }]} contentContainerStyle={styles.verseTextContainer}>
               {difficulty === 'hard' ? (
                 <View style={styles.hardModeContainer}>
                   <View style={[styles.hardModeIcon, { backgroundColor: isDark ? 'rgba(96,165,250,0.15)' : 'rgba(10,126,164,0.1)' }]}>
@@ -693,6 +712,24 @@ export default function StudySessionScreen() {
           const statusStyle = statusColors[status];
           const statusIcon = status === 'success' ? 'checkmark.circle.fill' : status === 'partial' ? 'checkmark.circle' : 'arrow.clockwise';
 
+          const customEntering = () => {
+            'worklet';
+            const animConfig = { duration: 400, easing: Easing.bezier(0.25, 0.46, 0.45, 0.94) };
+            return {
+              initialValues: {
+                opacity: 0,
+                transform: [{ translateY: 30 }, { scale: 0.95 }],
+              },
+              animations: {
+                opacity: withDelay(100, withTiming(1, animConfig)),
+                transform: [
+                  { translateY: withDelay(100, withTiming(0, animConfig)) },
+                  { scale: withDelay(100, withTiming(1, animConfig)) },
+                ],
+              },
+            };
+          };
+
           return (
             <Animated.View
               style={[
@@ -704,7 +741,7 @@ export default function StudySessionScreen() {
                   maxHeight: CARD_MAX_HEIGHT,
                 },
               ]}
-              entering={SlideInUp.duration(300)}
+              entering={customEntering}
             >
               <View style={styles.resultCardContent}>
                 {/* Header with status */}
@@ -736,6 +773,31 @@ export default function StudySessionScreen() {
             </Animated.View>
           );
         })()}
+        </View>
+
+        {/* Controls area - inside each chunk item */}
+        <View style={styles.controlsContainer}>
+          {recordingState === 'idle' && !transcribing && !isCompleted && currentIndex === index && (
+            <Pressable
+              style={[styles.micButton, { backgroundColor: buttonBg }]}
+              onPress={handleMicPress}
+            >
+              <IconSymbol name="mic.fill" size={32} color="#fff" />
+            </Pressable>
+          )}
+
+          {recordingState === 'idle' && !transcribing && isCompleted && currentIndex === index && (
+            <Pressable
+              style={[styles.nextButton, { backgroundColor: buttonBg }]}
+              onPress={handleNext}
+            >
+              <Text style={styles.nextButtonText}>
+                {completedChunks.size === chunks.length ? 'See Results' : 'Next'}
+              </Text>
+              <IconSymbol name="arrow.right" size={20} color="#fff" />
+            </Pressable>
+          )}
+        </View>
       </View>
     );
   };
@@ -787,32 +849,6 @@ export default function StudySessionScreen() {
           index,
         })}
       />
-
-      {/* Controls - Always rendered to preserve layout, content conditionally shown */}
-      {currentIndex < chunks.length && (
-        <View style={styles.controlsContainer}>
-          {recordingState === 'idle' && !transcribing && !completedChunks.has(currentIndex) && (
-            <Pressable
-              style={[styles.micButton, { backgroundColor: buttonBg }]}
-              onPress={handleMicPress}
-            >
-              <IconSymbol name="mic.fill" size={32} color="#fff" />
-            </Pressable>
-          )}
-
-          {recordingState === 'idle' && !transcribing && completedChunks.has(currentIndex) && (
-            <Pressable
-              style={[styles.nextButton, { backgroundColor: buttonBg }]}
-              onPress={handleNext}
-            >
-              <Text style={styles.nextButtonText}>
-                {completedChunks.size === chunks.length ? 'See Results' : 'Next'}
-              </Text>
-              <IconSymbol name="arrow.right" size={20} color="#fff" />
-            </Pressable>
-          )}
-        </View>
-      )}
 
       {/* Recording Bar - horizontal bar at bottom */}
       <Animated.View
@@ -878,12 +914,18 @@ const styles = StyleSheet.create({
   chunkContainer: {
     flex: 1,
     padding: 16,
-    gap: 12,
+  },
+  cardsArea: {
+    flex: 1,
     justifyContent: 'center',
+    gap: 12,
   },
   card: {
     borderRadius: 16,
     overflow: 'hidden',
+  },
+  verseCard: {
+    borderWidth: 1,
   },
   resultCard: {
     borderWidth: 1,
@@ -1014,6 +1056,7 @@ const styles = StyleSheet.create({
     paddingBottom: 40,
     paddingTop: 20,
     alignItems: 'center',
+    minHeight: 132, // 72 (button) + 20 (paddingTop) + 40 (paddingBottom)
   },
   micButton: {
     width: 72,
@@ -1149,6 +1192,8 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   resultsContent: {
+    flex: 1,
+    justifyContent: 'center',
     alignItems: 'center',
     gap: 24,
   },

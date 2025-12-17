@@ -18,7 +18,7 @@ export default function RootLayout() {
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="add/index" options={{ title: 'Add Verse' }} />
         <Stack.Screen name="add/[book]/[chapter]" options={{ title: 'Select Verses' }} />
-        <Stack.Screen name="study/[id]" options={{ title: 'Study Setup' }} />
+        <Stack.Screen name="study/[id]" options={{ title: 'Setup' }} />
         <Stack.Screen name="study/session" options={{ title: 'Study' }} />
         <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
       </Stack>
