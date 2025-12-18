@@ -18,8 +18,7 @@ import {
   calculateFinalScore,
   createResultsPageItem,
 } from '@/lib/study-chunks';
-import { transcribeAudio } from '@/lib/whisper';
-import { evaluateRecitation } from '@/lib/evaluate';
+import { transcribeAudio, evaluateRecitation } from '@/lib/api';
 
 interface ChunkResult {
   score: number;
@@ -58,7 +57,7 @@ interface UseStudySessionReturn {
   done: () => void;
 
   // Recording result handler
-  processRecording: (uri: string) => Promise<{
+  processRecording: (uri: string, durationSeconds: number) => Promise<{
     score: number;
     alignment: AlignmentWord[];
     allDone: boolean;
@@ -115,12 +114,12 @@ export function useStudySession({
   }, [chunkResults]);
 
   // Process a recording and update state
-  const processRecording = useCallback(async (uri: string) => {
+  const processRecording = useCallback(async (uri: string, durationSeconds: number) => {
     const currentChunk = chunks[currentIndex];
     const actualText = currentChunk.text;
 
-    // Transcribe with Whisper
-    const transcription = await transcribeAudio(uri);
+    // Transcribe with Soniox (via Supabase Edge Function)
+    const transcription = await transcribeAudio(uri, durationSeconds);
 
     // Evaluate with LLM
     const { cleanedTranscription, alignment } = await evaluateRecitation(actualText, transcription);

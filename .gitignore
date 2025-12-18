@@ -46,3 +46,7 @@ app-example
 # Claude
 .claude/
 CLAUDE.md
+
+# Supabase
+supabase/.temp/
+supabase/.env.local

@@ -11,6 +11,8 @@ export interface VerseProgress {
   hard: DifficultyProgress;
 }
 
+export type BibleVersion = 'ESV' | 'NLT';
+
 export interface SavedVerse {
   id: string;
   collectionId: string; // which collection this verse belongs to
@@ -19,6 +21,7 @@ export interface SavedVerse {
   verseStart: number;
   verseEnd: number;
   text: string;
+  version: BibleVersion; // which translation this verse was saved in
   createdAt: number;
   progress: VerseProgress;
 }
@@ -109,11 +112,12 @@ export async function getSavedVerses(): Promise<SavedVerse[]> {
   try {
     const data = await AsyncStorage.getItem(VERSES_KEY);
     const verses = data ? JSON.parse(data) : [];
-    // Migrate old verses without progress or collectionId
+    // Migrate old verses without progress, collectionId, or version
     return verses.map((v: SavedVerse) => ({
       ...v,
       progress: v.progress ?? DEFAULT_PROGRESS,
       collectionId: v.collectionId ?? DEFAULT_COLLECTION_ID,
+      version: v.version ?? 'ESV', // Default old verses to ESV
     }));
   } catch {
     return [];
@@ -126,14 +130,16 @@ export async function getVersesByCollection(collectionId: string): Promise<Saved
 }
 
 export async function saveVerse(
-  verse: Omit<SavedVerse, 'id' | 'createdAt' | 'progress' | 'collectionId'>,
-  collectionId: string = DEFAULT_COLLECTION_ID
+  verse: Omit<SavedVerse, 'id' | 'createdAt' | 'progress' | 'collectionId' | 'version'>,
+  collectionId: string = DEFAULT_COLLECTION_ID,
+  version: BibleVersion = 'ESV'
 ): Promise<SavedVerse> {
   const verses = await getSavedVerses();
 
   const newVerse: SavedVerse = {
     ...verse,
     collectionId,
+    version,
     id: `${verse.book}-${verse.chapter}-${verse.verseStart}-${verse.verseEnd}-${Date.now()}`,
     createdAt: Date.now(),
     progress: DEFAULT_PROGRESS,
