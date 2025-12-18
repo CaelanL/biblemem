@@ -18,7 +18,8 @@ import {
   calculateFinalScore,
   createResultsPageItem,
 } from '@/lib/study-chunks';
-import { transcribeAudio, evaluateRecitation } from '@/lib/api';
+import { processRecording as processRecordingApi } from '@/lib/api';
+import { alignTranscription } from '@/lib/align';
 
 interface ChunkResult {
   score: number;
@@ -118,11 +119,11 @@ export function useStudySession({
     const currentChunk = chunks[currentIndex];
     const actualText = currentChunk.text;
 
-    // Transcribe with Soniox (via Supabase Edge Function)
-    const transcription = await transcribeAudio(uri, durationSeconds);
+    // Process recording: transcribe + clean in one call (or two for longer recordings)
+    const { cleanedTranscription } = await processRecordingApi(uri, durationSeconds, actualText);
 
-    // Evaluate with LLM
-    const { cleanedTranscription, alignment } = await evaluateRecitation(actualText, transcription);
+    // Align locally (no API call needed)
+    const alignment = alignTranscription(actualText, cleanedTranscription);
 
     // Calculate score
     const score = calculateChunkScore(alignment);
