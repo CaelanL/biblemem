@@ -59,7 +59,7 @@ Return ONLY the cleaned transcription text. No explanations, no quotes, no label
             content: [{ type: 'input_text', text: prompt }],
           },
         ],
-        max_output_tokens: 500,
+        max_output_tokens: 1000,
         reasoning: { effort: 'minimal' },
       }),
     });
