@@ -119,7 +119,33 @@ export async function recordTranscriptionUsage(
 }
 
 /**
- * Check and increment evaluation usage
+ * Check evaluation usage without incrementing
+ * Call BEFORE starting evaluation to pre-check quota
+ */
+export async function checkEvaluateUsage(
+  userId: string
+): Promise<UsageResult> {
+  const tier = await getUserTier(userId);
+  const limit = LIMITS[tier].evaluate_count;
+  const used = await getCurrentUsage(userId, "evaluate_count");
+
+  if (used >= limit) {
+    return { allowed: false, used, limit };
+  }
+
+  return { allowed: true, used, limit };
+}
+
+/**
+ * Record evaluation usage
+ * Call AFTER successful evaluation
+ */
+export async function recordEvaluateUsage(userId: string): Promise<void> {
+  await incrementUsage(userId, "evaluate_count", 1);
+}
+
+/**
+ * Check and increment evaluation usage (legacy - kept for compatibility)
  */
 export async function checkAndIncrementEvaluateUsage(
   userId: string

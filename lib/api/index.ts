@@ -7,5 +7,4 @@
 
 export { supabase, ensureAuth, getAuthToken } from "./client";
 export { fetchVerse, fetchVerses, type BibleVersion, type BibleVerse } from "./bible";
-export { transcribeAudio } from "./transcribe";
-export { evaluateRecitation, type EvaluationResult } from "./evaluate";
+export { processRecording, type ProcessRecordingResult } from "./recording";

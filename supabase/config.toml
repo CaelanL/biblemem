@@ -36,14 +36,8 @@ enabled = true
 file_size_limit = "10MB"
 
 # Edge Functions
-[functions.upload-url]
-verify_jwt = true
-
 [functions.bible]
 verify_jwt = true
 
-[functions.transcribe]
-verify_jwt = true
-
-[functions.evaluate]
+[functions.process-recording]
 verify_jwt = true
