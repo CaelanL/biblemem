@@ -1,7 +1,10 @@
+import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { normalizeBookName } from '@/lib/bible';
-import { saveVerse } from '@/lib/storage';
+import { saveVerse, type BibleVersion } from '@/lib/storage';
+import { useSettings } from '@/lib/settings';
+import { fetchVerse } from '@/lib/api';
 import bibleData from '@/assets/bible/esv.json';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { useRef, useState, useCallback } from 'react';
@@ -11,6 +14,9 @@ import {
   Text,
   View,
   Pressable,
+  Alert,
+  ActivityIndicator,
+  Modal,
   type LayoutRectangle,
   type NativeTouchEvent,
   type GestureResponderEvent,
@@ -27,10 +33,16 @@ interface VerseLayout {
 }
 
 export default function VerseSelectScreen() {
-  const { book, chapter, collectionId } = useLocalSearchParams<{ book: string; chapter: string; collectionId?: string }>();
+  const { book, chapter, collectionId, version } = useLocalSearchParams<{
+    book: string;
+    chapter: string;
+    collectionId?: string;
+    version?: string;
+  }>();
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
   const isDark = colorScheme === 'dark';
+  const { settings } = useSettings();
 
   const bookName = normalizeBookName(decodeURIComponent(book ?? ''));
   const chapterNum = parseInt(chapter ?? '1', 10);
@@ -39,10 +51,16 @@ export default function VerseSelectScreen() {
     ([a], [b]) => parseInt(a, 10) - parseInt(b, 10)
   );
 
+  // Translation from URL param (passed from book selection), fallback to settings
+  const initialVersion = (version === 'ESV' || version === 'NLT') ? version : settings.bibleVersion;
+  const [selectedVersion, setSelectedVersion] = useState<BibleVersion>(initialVersion);
+  const [versionPickerVisible, setVersionPickerVisible] = useState(false);
+
   // Selection state
   const [selectionStart, setSelectionStart] = useState<number | null>(null);
   const [selectionEnd, setSelectionEnd] = useState<number | null>(null);
   const [isSelecting, setIsSelecting] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
 
   // Layout tracking
   const verseLayouts = useRef<VerseLayout[]>([]);
@@ -203,31 +221,42 @@ export default function VerseSelectScreen() {
   // ============ ACTIONS ============
 
   const handleAddVerses = async () => {
-    if (!hasSelection) return;
+    if (!hasSelection || isSaving) return;
 
     const min = Math.min(selectionStart!, selectionEnd!);
     const max = Math.max(selectionStart!, selectionEnd!);
 
-    const texts: string[] = [];
-    for (let v = min; v <= max; v++) {
-      const text = chapterData[String(v)];
-      if (text) texts.push(text);
-    }
+    setIsSaving(true);
 
-    await saveVerse({
-      book: bookName,
-      chapter: chapterNum,
-      verseStart: min,
-      verseEnd: max,
-      text: texts.join(' '),
-    }, collectionId);
+    try {
+      // Build reference string (e.g., "John 3:16" or "John 3:16-18")
+      const reference = min === max
+        ? `${bookName} ${chapterNum}:${min}`
+        : `${bookName} ${chapterNum}:${min}-${max}`;
 
-    router.dismissAll();
-    // Navigate back to the collection if we came from one, otherwise go home
-    if (collectionId) {
-      router.replace(`/collection/${collectionId}`);
-    } else {
-      router.replace('/');
+      // Fetch verse text from API using selected translation
+      const { text } = await fetchVerse(reference, selectedVersion);
+
+      await saveVerse({
+        book: bookName,
+        chapter: chapterNum,
+        verseStart: min,
+        verseEnd: max,
+        text,
+      }, collectionId, selectedVersion);
+
+      // Navigate back properly without corrupting navigation state
+      // Using navigate() instead of dismissAll()+replace() to preserve tab bar
+      if (collectionId) {
+        router.navigate(`/collection/${collectionId}`);
+      } else {
+        router.navigate('/');
+      }
+    } catch (error) {
+      console.error('Failed to add verses:', error);
+      Alert.alert('Error', `Failed to add verses: ${error}`);
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -245,6 +274,12 @@ export default function VerseSelectScreen() {
   const highlightBg = isDark ? 'rgba(96, 165, 250, 0.35)' : 'rgba(10, 126, 164, 0.25)';
   const buttonBg = isDark ? '#3b82f6' : '#0a7ea4';
 
+  const handleVersionSelect = (ver: BibleVersion) => {
+    Haptics.selectionAsync();
+    setSelectedVersion(ver);
+    setVersionPickerVisible(false);
+  };
+
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <Stack.Screen
@@ -252,8 +287,63 @@ export default function VerseSelectScreen() {
           title: `${bookName} ${chapterNum}`,
           headerStyle: { backgroundColor: colors.background },
           headerTintColor: colors.text,
+          headerRight: () => (
+            <Pressable
+              style={styles.versionPill}
+              onPress={() => setVersionPickerVisible(true)}
+            >
+              <Text style={[styles.versionPillText, { color: colors.tint }]}>
+                {selectedVersion}
+              </Text>
+              <IconSymbol name="chevron.up.chevron.down" size={10} color={colors.tint} />
+            </Pressable>
+          ),
         }}
       />
+
+      {/* Version Picker Modal */}
+      <Modal
+        visible={versionPickerVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setVersionPickerVisible(false)}
+      >
+        <Pressable
+          style={styles.modalOverlay}
+          onPress={() => setVersionPickerVisible(false)}
+        >
+          <View style={[styles.pickerContainer, { backgroundColor: isDark ? '#2c2c2e' : '#fff' }]}>
+            <Text style={[styles.pickerTitle, { color: colors.text }]}>Translation</Text>
+            {(['ESV', 'NLT'] as BibleVersion[]).map((ver) => (
+              <Pressable
+                key={ver}
+                style={[
+                  styles.pickerOption,
+                  selectedVersion === ver && { backgroundColor: isDark ? '#0a84ff' : '#007aff' },
+                ]}
+                onPress={() => handleVersionSelect(ver)}
+              >
+                <Text
+                  style={[
+                    styles.pickerOptionText,
+                    { color: selectedVersion === ver ? '#fff' : colors.text },
+                  ]}
+                >
+                  {ver}
+                </Text>
+                <Text
+                  style={[
+                    styles.pickerOptionSubtext,
+                    { color: selectedVersion === ver ? 'rgba(255,255,255,0.7)' : colors.icon },
+                  ]}
+                >
+                  {ver === 'ESV' ? 'English Standard Version' : 'New Living Translation'}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+        </Pressable>
+      </Modal>
 
       <View
         style={styles.touchContainer}
@@ -309,10 +399,15 @@ export default function VerseSelectScreen() {
           ]}
         >
           <Pressable
-            style={[styles.addButton, { backgroundColor: buttonBg }]}
+            style={[styles.addButton, { backgroundColor: buttonBg, opacity: isSaving ? 0.7 : 1 }]}
             onPress={handleAddVerses}
+            disabled={isSaving}
           >
-            <Text style={styles.addButtonText}>{buttonText}</Text>
+            {isSaving ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <Text style={styles.addButtonText}>{buttonText}</Text>
+            )}
           </Pressable>
         </View>
       )}
@@ -323,6 +418,55 @@ export default function VerseSelectScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+  },
+  versionPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    marginRight: 8,
+  },
+  versionPillText: {
+    fontSize: 17,
+    fontWeight: '400',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  pickerContainer: {
+    width: '80%',
+    maxWidth: 300,
+    borderRadius: 14,
+    padding: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  pickerTitle: {
+    fontSize: 17,
+    fontWeight: '600',
+    marginBottom: 12,
+    textAlign: 'center',
+  },
+  pickerOption: {
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+    marginBottom: 6,
+  },
+  pickerOptionText: {
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  pickerOptionSubtext: {
+    fontSize: 12,
+    marginTop: 2,
   },
   touchContainer: {
     flex: 1,

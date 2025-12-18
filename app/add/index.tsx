@@ -3,6 +3,8 @@ import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { BIBLE_BOOKS, OLD_TESTAMENT_END } from '@/lib/bible/books';
 import { getChapterCount } from '@/lib/bible';
+import { useSettings } from '@/lib/settings';
+import { type BibleVersion } from '@/lib/storage';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
 import {
@@ -11,21 +13,31 @@ import {
   StyleSheet,
   Text,
   View,
+  Modal,
 } from 'react-native';
+import * as Haptics from 'expo-haptics';
 
 export default function AddVerseScreen() {
   const { collectionId } = useLocalSearchParams<{ collectionId?: string }>();
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
+  const isDark = colorScheme === 'dark';
+  const { settings } = useSettings();
+
   const [expandedBook, setExpandedBook] = useState<string | null>(null);
+  const [selectedVersion, setSelectedVersion] = useState<BibleVersion>(settings.bibleVersion);
+  const [versionPickerVisible, setVersionPickerVisible] = useState(false);
 
   const handleBookPress = (book: string) => {
     setExpandedBook(expandedBook === book ? null : book);
   };
 
   const handleChapterPress = (book: string, chapter: number) => {
-    const params = collectionId ? `?collectionId=${collectionId}` : '';
-    router.push(`/add/${encodeURIComponent(book)}/${chapter}${params}`);
+    const params = new URLSearchParams();
+    if (collectionId) params.set('collectionId', collectionId);
+    params.set('version', selectedVersion);
+    const queryString = params.toString();
+    router.push(`/add/${encodeURIComponent(book)}/${chapter}?${queryString}`);
   };
 
   const renderChapterGrid = (book: string) => {
@@ -79,6 +91,12 @@ export default function AddVerseScreen() {
     );
   };
 
+  const handleVersionSelect = (version: BibleVersion) => {
+    Haptics.selectionAsync();
+    setSelectedVersion(version);
+    setVersionPickerVisible(false);
+  };
+
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <Stack.Screen
@@ -86,8 +104,64 @@ export default function AddVerseScreen() {
           title: 'Add Verse',
           headerStyle: { backgroundColor: colors.background },
           headerTintColor: colors.text,
+          headerRight: () => (
+            <Pressable
+              style={styles.versionPill}
+              onPress={() => setVersionPickerVisible(true)}
+            >
+              <Text style={[styles.versionPillText, { color: colors.tint }]}>
+                {selectedVersion}
+              </Text>
+              <IconSymbol name="chevron.up.chevron.down" size={10} color={colors.tint} />
+            </Pressable>
+          ),
         }}
       />
+
+      {/* Version Picker Modal */}
+      <Modal
+        visible={versionPickerVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setVersionPickerVisible(false)}
+      >
+        <Pressable
+          style={styles.modalOverlay}
+          onPress={() => setVersionPickerVisible(false)}
+        >
+          <View style={[styles.pickerContainer, { backgroundColor: isDark ? '#2c2c2e' : '#fff' }]}>
+            <Text style={[styles.pickerTitle, { color: colors.text }]}>Translation</Text>
+            {(['ESV', 'NLT'] as BibleVersion[]).map((version) => (
+              <Pressable
+                key={version}
+                style={[
+                  styles.pickerOption,
+                  selectedVersion === version && { backgroundColor: isDark ? '#0a84ff' : '#007aff' },
+                ]}
+                onPress={() => handleVersionSelect(version)}
+              >
+                <Text
+                  style={[
+                    styles.pickerOptionText,
+                    { color: selectedVersion === version ? '#fff' : colors.text },
+                  ]}
+                >
+                  {version}
+                </Text>
+                <Text
+                  style={[
+                    styles.pickerOptionSubtext,
+                    { color: selectedVersion === version ? 'rgba(255,255,255,0.7)' : colors.icon },
+                  ]}
+                >
+                  {version === 'ESV' ? 'English Standard Version' : 'New Living Translation'}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+        </Pressable>
+      </Modal>
+
       <ScrollView style={styles.scrollView}>
         {BIBLE_BOOKS.map((book, index) => renderBook(book, index))}
         <View style={styles.bottomPadding} />
@@ -99,6 +173,55 @@ export default function AddVerseScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+  },
+  versionPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    marginRight: 8,
+  },
+  versionPillText: {
+    fontSize: 17,
+    fontWeight: '400',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  pickerContainer: {
+    width: '80%',
+    maxWidth: 300,
+    borderRadius: 14,
+    padding: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  pickerTitle: {
+    fontSize: 17,
+    fontWeight: '600',
+    marginBottom: 12,
+    textAlign: 'center',
+  },
+  pickerOption: {
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+    marginBottom: 6,
+  },
+  pickerOptionText: {
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  pickerOptionSubtext: {
+    fontSize: 12,
+    marginTop: 2,
   },
   scrollView: {
     flex: 1,

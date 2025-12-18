@@ -206,6 +206,10 @@ export default function StudySessionScreen() {
     try {
       setTranscribing(true);
 
+      // Get duration before stopping
+      const status = await recordingRef.current.getStatusAsync();
+      const durationSeconds = Math.ceil((status.durationMillis ?? 0) / 1000);
+
       await recordingRef.current.stopAndUnloadAsync();
       const uri = recordingRef.current.getURI();
       recordingRef.current = null;
@@ -216,8 +220,8 @@ export default function StudySessionScreen() {
 
       setRecordingState('idle');
 
-      // Process recording through session hook
-      await session.processRecording(uri);
+      // Process recording through session hook (with duration for usage metering)
+      await session.processRecording(uri, durationSeconds);
 
       // Hide bar after processing
       hideRecordingBar(() => setTranscribing(false));

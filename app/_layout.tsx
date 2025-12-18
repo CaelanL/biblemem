@@ -12,6 +12,9 @@ export const unstable_settings = {
 export default function RootLayout() {
   const colorScheme = useColorScheme();
 
+  // TODO: Add login/signup flow before using API features
+  // For now, skip auth initialization - will add proper auth screens later
+
   return (
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
       <Stack

@@ -131,6 +131,7 @@ export default function CollectionScreen() {
           <View style={styles.cardText}>
             <Text style={[styles.verseReference, { color: primaryColor }]}>
               {formatVerseReference(verse)}
+              <Text style={[styles.versionBadge, { color: colors.icon }]}> • {verse.version}</Text>
             </Text>
             <Text style={[styles.versePreview, { color: colors.text }]} numberOfLines={2}>
               {verse.text}
@@ -268,6 +269,9 @@ const styles = StyleSheet.create({
   verseReference: {
     fontSize: 15,
     fontWeight: '600',
+  },
+  versionBadge: {
+    fontWeight: '400',
   },
   versePreview: {
     fontSize: 15,
