@@ -1,7 +1,7 @@
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
-import { formatVerseReference, type SavedVerse } from '@/lib/storage';
+import { formatVerseReference, type SavedVerse, type Difficulty } from '@/lib/storage';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated, {
@@ -36,6 +36,15 @@ export function SwipeableVerseCard({
   const cardBg = isDark ? '#1c1c1e' : '#ffffff';
   const borderColor = isDark ? 'rgba(96,165,250,0.3)' : 'rgba(10,126,164,0.25)';
   const primaryColor = isDark ? '#60a5fa' : '#0a7ea4';
+
+  // Get highest completed difficulty (90%+)
+  const getHighestDifficulty = (): Difficulty | null => {
+    if (verse.progress.hard.completed) return 'hard';
+    if (verse.progress.medium.completed) return 'medium';
+    if (verse.progress.easy.completed) return 'easy';
+    return null;
+  };
+  const highestDifficulty = getHighestDifficulty();
 
   const translateX = useSharedValue(0);
   const itemHeight = useSharedValue<number | null>(null);
@@ -117,13 +126,23 @@ export function SwipeableVerseCard({
                 <IconSymbol name="book.fill" size={20} color={colors.icon} />
               </View>
               <View style={styles.cardText}>
-                <Text style={[styles.verseReference, { color: primaryColor }]}>
-                  {formatVerseReference(verse)}
-                  <Text style={[styles.versionBadge, { color: colors.icon }]}>
-                    {' '}
-                    • {verse.version}
+                <View style={styles.referenceRow}>
+                  <Text style={[styles.verseReference, { color: primaryColor }]}>
+                    {formatVerseReference(verse)}
+                    <Text style={[styles.versionBadge, { color: colors.icon }]}>
+                      {' '}• {verse.version}
+                    </Text>
                   </Text>
-                </Text>
+                  {highestDifficulty === 'easy' && (
+                    <View style={[styles.difficultyDot, { backgroundColor: '#eab308' }]} />
+                  )}
+                  {highestDifficulty === 'medium' && (
+                    <View style={[styles.difficultyDot, { backgroundColor: '#1d4ed8' }]} />
+                  )}
+                  {highestDifficulty === 'hard' && (
+                    <IconSymbol name="checkmark" size={12} color="#22c55e" />
+                  )}
+                </View>
                 <Text style={[styles.versePreview, { color: colors.text }]} numberOfLines={2}>
                   {verse.text}
                 </Text>
@@ -191,9 +210,19 @@ const styles = StyleSheet.create({
     flex: 1,
     gap: 4,
   },
+  referenceRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
   verseReference: {
     fontSize: 15,
     fontWeight: '600',
+  },
+  difficultyDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
   },
   versionBadge: {
     fontWeight: '400',

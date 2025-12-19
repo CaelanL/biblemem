@@ -181,14 +181,25 @@ export default function StudySetupScreen() {
                 ]}
                 onPress={() => setDifficulty(level)}
               >
-                <Text
-                  style={[
-                    styles.segmentText,
-                    { color: difficulty === level ? '#fff' : colors.text },
-                  ]}
-                >
-                  {level.charAt(0).toUpperCase() + level.slice(1)}
-                </Text>
+                <View style={styles.segmentHeader}>
+                  <Text
+                    style={[
+                      styles.segmentText,
+                      { color: difficulty === level ? '#fff' : colors.text },
+                    ]}
+                  >
+                    {level.charAt(0).toUpperCase() + level.slice(1)}
+                  </Text>
+                  {level === 'easy' && (
+                    <View style={[styles.difficultyDot, { backgroundColor: '#eab308' }]} />
+                  )}
+                  {level === 'medium' && (
+                    <View style={[styles.difficultyDot, { backgroundColor: '#1d4ed8' }]} />
+                  )}
+                  {level === 'hard' && (
+                    <IconSymbol name="checkmark" size={12} color="#22c55e" />
+                  )}
+                </View>
                 <Text
                   style={[
                     styles.segmentSubtext,
@@ -366,9 +377,19 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     alignItems: 'center',
   },
+  segmentHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
   segmentText: {
     fontSize: 15,
     fontWeight: '600',
+  },
+  difficultyDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
   },
   segmentSubtext: {
     fontSize: 11,
