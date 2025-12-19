@@ -88,32 +88,24 @@ function seededRandom(seed: number): () => number {
 /**
  * Apply difficulty masking to text.
  * - easy: show full text
- * - medium: blank ~50% of words (deterministic based on seed)
+ * - medium: blank exactly 50% of words (alternating, seeded offset)
  * - hard: show nothing
  *
  * @param text - The annotated text to mask
  * @param difficulty - easy | medium | hard
- * @param seed - Numeric seed for deterministic blanking (e.g., chunk index)
+ * @param seed - Numeric seed for deterministic offset (0 or 1)
  */
 export function applyDifficulty(text: string, difficulty: Difficulty, seed: number = 0): string {
   if (difficulty === 'easy') return text;
   if (difficulty === 'hard') return '';
 
-  // Medium: blank out ~50% of words, avoid consecutive blanks
-  const random = seededRandom(seed);
+  // Medium: blank every other word, offset determined by seed
+  const offset = seed % 2; // 0 or 1
   const words = text.split(' ');
-  let lastBlanked = false;
 
   return words.map((word, i) => {
-    // Don't blank if last word was blanked (avoid consecutive)
-    if (lastBlanked) {
-      lastBlanked = false;
-      return word;
-    }
-
-    // ~50% chance to blank, but not first or last word
-    if (i > 0 && i < words.length - 1 && random() < 0.5) {
-      lastBlanked = true;
+    // Blank if index matches offset pattern (alternating)
+    if (i % 2 === offset) {
       // Replace letters with underscores, keep trailing punctuation
       const letters = word.replace(/[^a-zA-Z]/g, '');
       const trailingPunct = word.match(/[^a-zA-Z]+$/)?.[0] || '';
@@ -147,12 +139,14 @@ function annotateVerseRange(fullText: string, startVerse: number, totalVerses: n
  * @param verse - The saved verse to parse
  * @param difficulty - Difficulty level for display masking
  * @param chunkSize - Number of verses per chunk
+ * @param sessionSeed - Seed for randomizing blanks (0 or 1)
  * @returns Array of chunks ready for study
  */
 export function parseVerseIntoChunks(
   verse: SavedVerse,
   difficulty: Difficulty,
-  chunkSize: number
+  chunkSize: number,
+  sessionSeed: number = 0
 ): Chunk[] {
   const totalVerses = verse.verseEnd - verse.verseStart + 1;
 
@@ -164,7 +158,7 @@ export function parseVerseIntoChunks(
       id: chunkId,
       verseNum: verse.verseStart,
       text: verse.text,
-      displayText: applyDifficulty(annotatedText, difficulty, hashString(chunkId)),
+      displayText: applyDifficulty(annotatedText, difficulty, hashString(chunkId) + sessionSeed),
     }];
   }
 
@@ -177,7 +171,7 @@ export function parseVerseIntoChunks(
       verseNum: verse.verseStart,
       verseNumEnd: verse.verseEnd,
       text: verse.text,
-      displayText: applyDifficulty(annotatedText, difficulty, hashString(chunkId)),
+      displayText: applyDifficulty(annotatedText, difficulty, hashString(chunkId) + sessionSeed),
     }];
   }
 
@@ -208,7 +202,7 @@ export function parseVerseIntoChunks(
       verseNum: startVerse,
       verseNumEnd: endVerse !== startVerse ? endVerse : undefined,
       text: combinedText,
-      displayText: applyDifficulty(annotatedText, difficulty, hashString(chunkId)),
+      displayText: applyDifficulty(annotatedText, difficulty, hashString(chunkId) + sessionSeed),
     });
   }
 

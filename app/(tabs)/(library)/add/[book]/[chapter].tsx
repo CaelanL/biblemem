@@ -74,6 +74,10 @@ export default function VerseSelectScreen() {
   const touchStartY = useRef(0);
   const touchStartTime = useRef(0);
 
+  // Auto-scroll during drag selection
+  const scrollViewHeight = useRef(0);
+  const autoScrollInterval = useRef<ReturnType<typeof setInterval> | null>(null);
+
   const hasSelection = selectionStart !== null && selectionEnd !== null;
 
   const isVerseSelected = (verseNum: number) => {
@@ -120,7 +124,8 @@ export default function VerseSelectScreen() {
     scrollOffset.current = e.nativeEvent.contentOffset.y;
   };
 
-  const handleScrollViewLayout = () => {
+  const handleScrollViewLayout = (e: any) => {
+    scrollViewHeight.current = e.nativeEvent.layout.height;
     if (scrollViewRef.current) {
       (scrollViewRef.current as any).measure?.(
         (_x: number, _y: number, _width: number, _height: number, _pageX: number, pageY: number) => {
@@ -137,8 +142,16 @@ export default function VerseSelectScreen() {
     }
   };
 
-  const handleTouchStart = (e: GestureResponderEvent) => {
-    const { pageY } = e.nativeEvent;
+  const clearAutoScroll = () => {
+    if (autoScrollInterval.current) {
+      clearInterval(autoScrollInterval.current);
+      autoScrollInterval.current = null;
+    }
+  };
+
+  // ScrollView touch handlers for initial detection
+  const handleScrollViewTouchStart = (e: any) => {
+    const pageY = e.nativeEvent.pageY;
     touchStartY.current = pageY;
     touchStartTime.current = Date.now();
 
@@ -154,31 +167,23 @@ export default function VerseSelectScreen() {
     }, 250);
   };
 
-  const handleTouchMove = (e: GestureResponderEvent) => {
-    const { pageY } = e.nativeEvent;
-
+  const handleScrollViewTouchMove = (e: any) => {
+    const pageY = e.nativeEvent.pageY;
+    // Cancel long-press if user scrolls
     if (!isSelecting && Math.abs(pageY - touchStartY.current) > 10) {
       clearLongPressTimer();
-      return;
-    }
-
-    if (isSelecting) {
-      const verse = getVerseAtY(pageY);
-      if (verse !== null && verse !== selectionEnd) {
-        Haptics.selectionAsync();
-        setSelectionEnd(verse);
-      }
     }
   };
 
-  const handleTouchEnd = (e: GestureResponderEvent) => {
-    const { pageY } = e.nativeEvent;
+  const handleScrollViewTouchEnd = (e: any) => {
+    const pageY = e.nativeEvent.pageY;
     const touchDuration = Date.now() - touchStartTime.current;
     const touchDistance = Math.abs(pageY - touchStartY.current);
 
     clearLongPressTimer();
 
-    if (touchDuration < 250 && touchDistance < 10) {
+    // Quick tap = select/deselect (only if not in selection mode)
+    if (touchDuration < 250 && touchDistance < 10 && !isSelecting) {
       if (hasSelection) {
         setSelectionStart(null);
         setSelectionEnd(null);
@@ -195,8 +200,42 @@ export default function VerseSelectScreen() {
     setIsSelecting(false);
   };
 
-  const handleStartShouldSetResponder = () => true;
-  const handleMoveShouldSetResponder = () => isSelecting;
+  // Outer View responder handlers - only active when selecting
+  const handleResponderMove = (e: GestureResponderEvent) => {
+    if (!isSelecting) return;
+
+    const pageY = e.nativeEvent.pageY;
+    const relativeY = pageY - scrollViewPageY.current;
+
+    // Update selection
+    const verse = getVerseAtY(pageY);
+    if (verse !== null && verse !== selectionEnd) {
+      Haptics.selectionAsync();
+      setSelectionEnd(verse);
+    }
+
+    // Auto-scroll when near edges (within 60px)
+    const EDGE_THRESHOLD = 60;
+    const SCROLL_SPEED = 8;
+
+    clearAutoScroll();
+
+    if (relativeY < EDGE_THRESHOLD) {
+      // Near top - scroll up
+      autoScrollInterval.current = setInterval(() => {
+        const newOffset = Math.max(0, scrollOffset.current - SCROLL_SPEED);
+        scrollViewRef.current?.scrollTo({ y: newOffset, animated: false });
+      }, 16);
+    } else if (relativeY > scrollViewHeight.current - EDGE_THRESHOLD) {
+      // Near bottom - scroll down
+      autoScrollInterval.current = setInterval(() => {
+        scrollViewRef.current?.scrollTo({
+          y: scrollOffset.current + SCROLL_SPEED,
+          animated: false,
+        });
+      }, 16);
+    }
+  };
 
   const handleAddVerses = async () => {
     if (!hasSelection || isSaving) return;
@@ -310,12 +349,19 @@ export default function VerseSelectScreen() {
 
       <View
         style={styles.touchContainer}
-        onStartShouldSetResponder={handleStartShouldSetResponder}
-        onMoveShouldSetResponder={handleMoveShouldSetResponder}
-        onResponderGrant={handleTouchStart}
-        onResponderMove={handleTouchMove}
-        onResponderRelease={handleTouchEnd}
-        onResponderTerminate={handleTouchEnd}
+        onStartShouldSetResponder={() => false}
+        onMoveShouldSetResponder={() => false}
+        onStartShouldSetResponderCapture={() => isSelecting}
+        onMoveShouldSetResponderCapture={() => isSelecting}
+        onResponderMove={handleResponderMove}
+        onResponderRelease={() => {
+          clearAutoScroll();
+          setIsSelecting(false);
+        }}
+        onResponderTerminate={() => {
+          clearAutoScroll();
+          setIsSelecting(false);
+        }}
       >
         <ScrollView
           ref={scrollViewRef}
@@ -324,6 +370,9 @@ export default function VerseSelectScreen() {
           onLayout={handleScrollViewLayout}
           scrollEventThrottle={16}
           scrollEnabled={!isSelecting}
+          onTouchStart={handleScrollViewTouchStart}
+          onTouchMove={handleScrollViewTouchMove}
+          onTouchEnd={handleScrollViewTouchEnd}
         >
           <View style={styles.versesContainer}>
             {verses.map(([verseNum, text]) => {
