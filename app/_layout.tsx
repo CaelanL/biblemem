@@ -1,47 +1,77 @@
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
-import { Stack } from 'expo-router';
+import { Stack, router, useSegments, useRootNavigationState } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import 'react-native-reanimated';
 import { useEffect } from 'react';
+import { View, ActivityIndicator } from 'react-native';
 
 import { useColorScheme } from '@/hooks/use-color-scheme';
-import { ensureAuth } from '@/lib/api';
 import { migrateLocalDataToServer } from '@/lib/sync';
+import { AuthProvider, useAuth } from '@/lib/auth';
 
 export const unstable_settings = {
   anchor: '(tabs)',
 };
 
-export default function RootLayout() {
+function RootLayoutNav() {
   const colorScheme = useColorScheme();
+  const { isAuthenticated, isLoading } = useAuth();
+  const segments = useSegments();
+  const navigationState = useRootNavigationState();
 
-  // Initialize auth and run migration on app start
+  // Handle navigation based on auth state
   useEffect(() => {
-    async function initApp() {
-      try {
-        // Ensure user is authenticated (creates anonymous user if needed)
-        await ensureAuth();
+    if (!navigationState?.key || isLoading) return;
 
-        // Migrate local data to server (runs once per device)
-        await migrateLocalDataToServer();
-      } catch (e) {
-        console.error('[App] Initialization error:', e);
-      }
+    const inAuthGroup = segments[0] === '(auth)';
+
+    if (!isAuthenticated && !inAuthGroup) {
+      // Not authenticated and not on auth screen - redirect to sign in
+      router.replace('/(auth)/sign-in');
+    } else if (isAuthenticated && inAuthGroup) {
+      // Authenticated but on auth screen - redirect to main app
+      router.replace('/(tabs)');
     }
-    initApp();
-  }, []);
+  }, [isAuthenticated, isLoading, segments, navigationState?.key]);
+
+  // Run migration when authenticated
+  useEffect(() => {
+    if (isAuthenticated) {
+      migrateLocalDataToServer().catch((e) => {
+        console.error('[App] Migration error:', e);
+      });
+    }
+  }, [isAuthenticated]);
+
+  // Show loading spinner while checking auth
+  if (isLoading) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colorScheme === 'dark' ? '#000' : '#fff' }}>
+        <ActivityIndicator size="large" color={colorScheme === 'dark' ? '#3b82f6' : '#0a7ea4'} />
+      </View>
+    );
+  }
 
   return (
+    <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
+      <Stack screenOptions={{ headerShown: false }}>
+        <Stack.Screen name="(auth)" />
+        <Stack.Screen name="(tabs)" />
+        <Stack.Screen name="session" options={{ presentation: 'fullScreenModal' }} />
+        <Stack.Screen name="modal" options={{ presentation: 'modal' }} />
+      </Stack>
+      <StatusBar style="auto" />
+    </ThemeProvider>
+  );
+}
+
+export default function RootLayout() {
+  return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-        <Stack screenOptions={{ headerShown: false }}>
-          <Stack.Screen name="(tabs)" />
-          <Stack.Screen name="session" options={{ presentation: 'fullScreenModal' }} />
-          <Stack.Screen name="modal" options={{ presentation: 'modal' }} />
-        </Stack>
-        <StatusBar style="auto" />
-      </ThemeProvider>
+      <AuthProvider>
+        <RootLayoutNav />
+      </AuthProvider>
     </GestureHandlerRootView>
   );
 }

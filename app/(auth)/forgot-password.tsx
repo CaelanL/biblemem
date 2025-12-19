@@ -1,0 +1,219 @@
+import { useState } from 'react';
+import {
+  View,
+  Text,
+  TextInput,
+  Pressable,
+  StyleSheet,
+  KeyboardAvoidingView,
+  Platform,
+  ActivityIndicator,
+  Alert,
+} from 'react-native';
+import { router } from 'expo-router';
+import { useColorScheme } from '@/hooks/use-color-scheme';
+import { Colors } from '@/constants/theme';
+import { useAuth } from '@/lib/auth';
+import { IconSymbol } from '@/components/ui/icon-symbol';
+
+export default function ForgotPasswordScreen() {
+  const colorScheme = useColorScheme();
+  const colors = Colors[colorScheme ?? 'light'];
+  const isDark = colorScheme === 'dark';
+  const { resetPassword } = useAuth();
+
+  const [email, setEmail] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [sent, setSent] = useState(false);
+
+  const buttonBg = isDark ? '#3b82f6' : '#0a7ea4';
+  const inputBg = isDark ? '#1c1c1e' : '#f5f5f5';
+  const borderColor = isDark ? '#333' : '#e0e0e0';
+
+  const handleResetPassword = async () => {
+    if (!email.trim()) {
+      Alert.alert('Error', 'Please enter your email');
+      return;
+    }
+
+    setLoading(true);
+    const { error } = await resetPassword(email.trim());
+    setLoading(false);
+
+    if (error) {
+      Alert.alert('Error', error);
+    } else {
+      setSent(true);
+    }
+  };
+
+  if (sent) {
+    return (
+      <View style={[styles.container, { backgroundColor: colors.background }]}>
+        <View style={styles.content}>
+          <View style={styles.successContainer}>
+            <View style={[styles.successIcon, { backgroundColor: isDark ? 'rgba(34,197,94,0.15)' : 'rgba(34,197,94,0.1)' }]}>
+              <IconSymbol name="checkmark.circle.fill" size={48} color="#22c55e" />
+            </View>
+            <Text style={[styles.successTitle, { color: colors.text }]}>Check Your Email</Text>
+            <Text style={[styles.successText, { color: colors.icon }]}>
+              We sent a password reset link to{'\n'}
+              <Text style={{ fontWeight: '600', color: colors.text }}>{email}</Text>
+            </Text>
+            <Pressable
+              style={[styles.button, { backgroundColor: buttonBg }]}
+              onPress={() => router.back()}
+            >
+              <Text style={styles.buttonText}>Back to Sign In</Text>
+            </Pressable>
+          </View>
+        </View>
+      </View>
+    );
+  }
+
+  return (
+    <KeyboardAvoidingView
+      style={[styles.container, { backgroundColor: colors.background }]}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+    >
+      <View style={styles.content}>
+        {/* Header */}
+        <View style={styles.header}>
+          <Pressable style={styles.backButton} onPress={() => router.back()}>
+            <IconSymbol name="chevron.left" size={24} color={colors.text} />
+          </Pressable>
+          <Text style={[styles.title, { color: colors.text }]}>Reset Password</Text>
+          <Text style={[styles.subtitle, { color: colors.icon }]}>
+            Enter your email and we'll send you a link to reset your password
+          </Text>
+        </View>
+
+        {/* Form */}
+        <View style={styles.form}>
+          <View style={[styles.inputContainer, { backgroundColor: inputBg, borderColor }]}>
+            <IconSymbol name="envelope.fill" size={18} color={colors.icon} />
+            <TextInput
+              style={[styles.input, { color: colors.text }]}
+              placeholder="Email"
+              placeholderTextColor={colors.icon}
+              value={email}
+              onChangeText={setEmail}
+              autoCapitalize="none"
+              keyboardType="email-address"
+              autoComplete="email"
+            />
+          </View>
+
+          <Pressable
+            style={[styles.button, { backgroundColor: buttonBg, opacity: loading ? 0.7 : 1 }]}
+            onPress={handleResetPassword}
+            disabled={loading}
+          >
+            {loading ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <Text style={styles.buttonText}>Send Reset Link</Text>
+            )}
+          </Pressable>
+        </View>
+
+        {/* Footer */}
+        <View style={styles.footer}>
+          <Text style={[styles.footerText, { color: colors.icon }]}>
+            Remember your password?{' '}
+          </Text>
+          <Pressable onPress={() => router.back()}>
+            <Text style={[styles.link, { color: buttonBg }]}>Sign in</Text>
+          </Pressable>
+        </View>
+      </View>
+    </KeyboardAvoidingView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+  },
+  content: {
+    flex: 1,
+    padding: 24,
+    justifyContent: 'center',
+  },
+  header: {
+    marginBottom: 40,
+  },
+  backButton: {
+    marginBottom: 24,
+  },
+  title: {
+    fontSize: 28,
+    fontWeight: '700',
+    marginBottom: 8,
+  },
+  subtitle: {
+    fontSize: 16,
+    lineHeight: 22,
+  },
+  form: {
+    gap: 16,
+  },
+  inputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    gap: 12,
+  },
+  input: {
+    flex: 1,
+    fontSize: 16,
+  },
+  button: {
+    paddingVertical: 16,
+    borderRadius: 12,
+    alignItems: 'center',
+    marginTop: 8,
+  },
+  buttonText: {
+    color: '#fff',
+    fontSize: 17,
+    fontWeight: '600',
+  },
+  link: {
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  footer: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    marginTop: 32,
+  },
+  footerText: {
+    fontSize: 15,
+  },
+  successContainer: {
+    alignItems: 'center',
+    gap: 16,
+  },
+  successIcon: {
+    width: 96,
+    height: 96,
+    borderRadius: 48,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  successTitle: {
+    fontSize: 24,
+    fontWeight: '700',
+  },
+  successText: {
+    fontSize: 16,
+    textAlign: 'center',
+    lineHeight: 24,
+  },
+});
