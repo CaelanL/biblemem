@@ -1,3 +1,4 @@
+import { AppHeader } from '@/components/app-header';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
@@ -6,7 +7,7 @@ import { saveVerse, type BibleVersion } from '@/lib/storage';
 import { useSettings } from '@/lib/settings';
 import { fetchVerse } from '@/lib/api';
 import bibleData from '@/assets/bible/esv.json';
-import { router, Stack, useLocalSearchParams } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { useRef, useState, useCallback } from 'react';
 import {
   ScrollView,
@@ -18,7 +19,6 @@ import {
   ActivityIndicator,
   Modal,
   type LayoutRectangle,
-  type NativeTouchEvent,
   type GestureResponderEvent,
 } from 'react-native';
 import * as Haptics from 'expo-haptics';
@@ -65,7 +65,7 @@ export default function VerseSelectScreen() {
   // Layout tracking
   const verseLayouts = useRef<VerseLayout[]>([]);
   const scrollOffset = useRef(0);
-  const scrollViewPageY = useRef(0); // ScrollView's position on screen
+  const scrollViewPageY = useRef(0);
   const scrollViewRef = useRef<ScrollView>(null);
 
   // Long press timer
@@ -82,14 +82,8 @@ export default function VerseSelectScreen() {
     return verseNum >= min && verseNum <= max;
   };
 
-  // Convert touch Y to verse number
   const getVerseAtY = useCallback((pageY: number): number | null => {
-    // pageY is absolute screen position
-    // scrollViewPageY is where ScrollView starts on screen
-    // scrollOffset is how far we've scrolled
-    // verse layouts are relative to scroll content (versesContainer which has padding)
-
-    const relativeY = pageY - scrollViewPageY.current + scrollOffset.current - 16; // 16 = versesContainer padding
+    const relativeY = pageY - scrollViewPageY.current + scrollOffset.current - 16;
 
     for (const layout of verseLayouts.current) {
       if (relativeY >= layout.top && relativeY <= layout.bottom) {
@@ -97,12 +91,10 @@ export default function VerseSelectScreen() {
       }
     }
 
-    // If above all verses, return first
     if (verseLayouts.current.length > 0 && relativeY < verseLayouts.current[0].top) {
       return verseLayouts.current[0].verseNum;
     }
 
-    // If below all verses, return last
     if (verseLayouts.current.length > 0) {
       const last = verseLayouts.current[verseLayouts.current.length - 1];
       if (relativeY > last.bottom) {
@@ -114,15 +106,12 @@ export default function VerseSelectScreen() {
   }, []);
 
   const handleVerseLayout = (verseNum: number, layout: LayoutRectangle) => {
-    // Remove old entry if exists
     verseLayouts.current = verseLayouts.current.filter(v => v.verseNum !== verseNum);
-    // Add new entry
     verseLayouts.current.push({
       verseNum,
       top: layout.y,
       bottom: layout.y + layout.height,
     });
-    // Keep sorted
     verseLayouts.current.sort((a, b) => a.verseNum - b.verseNum);
   };
 
@@ -131,7 +120,6 @@ export default function VerseSelectScreen() {
   };
 
   const handleScrollViewLayout = () => {
-    // Measure ScrollView's position on screen using ref
     if (scrollViewRef.current) {
       (scrollViewRef.current as any).measure?.(
         (_x: number, _y: number, _width: number, _height: number, _pageX: number, pageY: number) => {
@@ -140,8 +128,6 @@ export default function VerseSelectScreen() {
       );
     }
   };
-
-  // ============ TOUCH HANDLING (Parent owns all touches) ============
 
   const clearLongPressTimer = () => {
     if (longPressTimer.current) {
@@ -155,7 +141,6 @@ export default function VerseSelectScreen() {
     touchStartY.current = pageY;
     touchStartTime.current = Date.now();
 
-    // Start long press timer for drag mode
     clearLongPressTimer();
     longPressTimer.current = setTimeout(() => {
       const verse = getVerseAtY(pageY);
@@ -165,19 +150,17 @@ export default function VerseSelectScreen() {
         setSelectionStart(verse);
         setSelectionEnd(verse);
       }
-    }, 250); // 250ms long press
+    }, 250);
   };
 
   const handleTouchMove = (e: GestureResponderEvent) => {
     const { pageY } = e.nativeEvent;
 
-    // Cancel long press if moved too much before it fired
     if (!isSelecting && Math.abs(pageY - touchStartY.current) > 10) {
       clearLongPressTimer();
       return;
     }
 
-    // If we're selecting, update selection end
     if (isSelecting) {
       const verse = getVerseAtY(pageY);
       if (verse !== null && verse !== selectionEnd) {
@@ -194,14 +177,11 @@ export default function VerseSelectScreen() {
 
     clearLongPressTimer();
 
-    // If it was a quick tap (not a long press or drag)
     if (touchDuration < 250 && touchDistance < 10) {
       if (hasSelection) {
-        // Clear selection on tap
         setSelectionStart(null);
         setSelectionEnd(null);
       } else {
-        // Tap to select single verse
         const verse = getVerseAtY(pageY);
         if (verse !== null) {
           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -214,11 +194,8 @@ export default function VerseSelectScreen() {
     setIsSelecting(false);
   };
 
-  // Responder methods - claim touches for this view
   const handleStartShouldSetResponder = () => true;
   const handleMoveShouldSetResponder = () => isSelecting;
-
-  // ============ ACTIONS ============
 
   const handleAddVerses = async () => {
     if (!hasSelection || isSaving) return;
@@ -229,12 +206,10 @@ export default function VerseSelectScreen() {
     setIsSaving(true);
 
     try {
-      // Build reference string (e.g., "John 3:16" or "John 3:16-18")
       const reference = min === max
         ? `${bookName} ${chapterNum}:${min}`
         : `${bookName} ${chapterNum}:${min}-${max}`;
 
-      // Fetch verse text from API using selected translation
       const { text } = await fetchVerse(reference, selectedVersion);
 
       await saveVerse({
@@ -245,12 +220,11 @@ export default function VerseSelectScreen() {
         text,
       }, collectionId, selectedVersion);
 
-      // Navigate back properly without corrupting navigation state
-      // Using navigate() instead of dismissAll()+replace() to preserve tab bar
+      // Navigate back to collection or library
       if (collectionId) {
-        router.navigate(`/collection/${collectionId}`);
+        router.navigate(`/(tabs)/(library)/${collectionId}`);
       } else {
-        router.navigate('/');
+        router.navigate('/(tabs)/(library)');
       }
     } catch (error) {
       console.error('Failed to add verses:', error);
@@ -259,8 +233,6 @@ export default function VerseSelectScreen() {
       setIsSaving(false);
     }
   };
-
-  // ============ RENDER ============
 
   const min = hasSelection ? Math.min(selectionStart!, selectionEnd!) : null;
   const max = hasSelection ? Math.max(selectionStart!, selectionEnd!) : null;
@@ -282,22 +254,12 @@ export default function VerseSelectScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
-      <Stack.Screen
-        options={{
-          title: `${bookName} ${chapterNum}`,
-          headerStyle: { backgroundColor: colors.background },
-          headerTintColor: colors.text,
-          headerRight: () => (
-            <Pressable
-              style={styles.versionPill}
-              onPress={() => setVersionPickerVisible(true)}
-            >
-              <Text style={[styles.versionPillText, { color: colors.tint }]}>
-                {selectedVersion}
-              </Text>
-              <IconSymbol name="chevron.up.chevron.down" size={10} color={colors.tint} />
-            </Pressable>
-          ),
+      <AppHeader
+        title={`${bookName} ${chapterNum}`}
+        rightButton={{
+          label: selectedVersion,
+          onPress: () => setVersionPickerVisible(true),
+          variant: 'text',
         }}
       />
 
@@ -418,18 +380,6 @@ export default function VerseSelectScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-  },
-  versionPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 8,
-    paddingVertical: 6,
-    marginRight: 8,
-  },
-  versionPillText: {
-    fontSize: 17,
-    fontWeight: '400',
   },
   modalOverlay: {
     flex: 1,

@@ -1,3 +1,4 @@
+import { AppHeader } from '@/components/app-header';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
@@ -5,7 +6,7 @@ import { BIBLE_BOOKS, OLD_TESTAMENT_END } from '@/lib/bible/books';
 import { getChapterCount } from '@/lib/bible';
 import { useSettings } from '@/lib/settings';
 import { type BibleVersion } from '@/lib/storage';
-import { router, Stack, useLocalSearchParams } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
 import {
   Pressable,
@@ -37,7 +38,7 @@ export default function AddVerseScreen() {
     if (collectionId) params.set('collectionId', collectionId);
     params.set('version', selectedVersion);
     const queryString = params.toString();
-    router.push(`/add/${encodeURIComponent(book)}/${chapter}?${queryString}`);
+    router.push(`/(tabs)/(library)/add/${encodeURIComponent(book)}/${chapter}?${queryString}`);
   };
 
   const renderChapterGrid = (book: string) => {
@@ -99,22 +100,12 @@ export default function AddVerseScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
-      <Stack.Screen
-        options={{
-          title: 'Add Verse',
-          headerStyle: { backgroundColor: colors.background },
-          headerTintColor: colors.text,
-          headerRight: () => (
-            <Pressable
-              style={styles.versionPill}
-              onPress={() => setVersionPickerVisible(true)}
-            >
-              <Text style={[styles.versionPillText, { color: colors.tint }]}>
-                {selectedVersion}
-              </Text>
-              <IconSymbol name="chevron.up.chevron.down" size={10} color={colors.tint} />
-            </Pressable>
-          ),
+      <AppHeader
+        title="Add Verse"
+        rightButton={{
+          label: selectedVersion,
+          onPress: () => setVersionPickerVisible(true),
+          variant: 'text',
         }}
       />
 
@@ -173,18 +164,6 @@ export default function AddVerseScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-  },
-  versionPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 8,
-    paddingVertical: 6,
-    marginRight: 8,
-  },
-  versionPillText: {
-    fontSize: 17,
-    fontWeight: '400',
   },
   modalOverlay: {
     flex: 1,

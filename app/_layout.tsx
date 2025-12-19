@@ -12,23 +12,12 @@ export const unstable_settings = {
 export default function RootLayout() {
   const colorScheme = useColorScheme();
 
-  // TODO: Add login/signup flow before using API features
-  // For now, skip auth initialization - will add proper auth screens later
-
   return (
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-      <Stack
-        screenOptions={{
-          headerBackButtonDisplayMode: 'minimal', // Show only back arrow, no text (iOS)
-        }}
-      >
-        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        <Stack.Screen name="collection/[id]" options={{ title: 'Collection' }} />
-        <Stack.Screen name="add/index" options={{ title: 'Add Verse' }} />
-        <Stack.Screen name="add/[book]/[chapter]" options={{ title: 'Select Verses' }} />
-        <Stack.Screen name="study/[id]" options={{ title: 'Setup' }} />
-        <Stack.Screen name="study/session" options={{ title: 'Study' }} />
-        <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
+      <Stack screenOptions={{ headerShown: false }}>
+        <Stack.Screen name="(tabs)" />
+        <Stack.Screen name="session" options={{ presentation: 'fullScreenModal' }} />
+        <Stack.Screen name="modal" options={{ presentation: 'modal' }} />
       </Stack>
       <StatusBar style="auto" />
     </ThemeProvider>

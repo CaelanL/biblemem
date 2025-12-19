@@ -1,3 +1,4 @@
+import { AppHeader } from '@/components/app-header';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { WAVEFORM_SAMPLES } from '@/components/study/Waveform';
 import { VerseCard } from '@/components/study/VerseCard';
@@ -15,7 +16,7 @@ import {
 } from '@/lib/study-chunks';
 import { Audio } from 'expo-av';
 import * as Haptics from 'expo-haptics';
-import { Stack, useLocalSearchParams } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -376,11 +377,17 @@ export default function StudySessionScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
-      <Stack.Screen
-        options={{
-          title: formatVerseReference(session.verse),
-          headerStyle: { backgroundColor: colors.background },
-          headerTintColor: colors.text,
+      <AppHeader
+        title={formatVerseReference(session.verse)}
+        showBack={false}
+        leftButton={{
+          icon: 'xmark',
+          onPress: () => {
+            Alert.alert('End Session?', 'Your progress will not be saved.', [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'End', style: 'destructive', onPress: () => router.back() },
+            ]);
+          },
         }}
       />
 

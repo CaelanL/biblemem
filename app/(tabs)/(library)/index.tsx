@@ -63,7 +63,7 @@ export default function LibraryScreen() {
   };
 
   const handleCollectionPress = (collection: Collection) => {
-    router.push(`/collection/${collection.id}`);
+    router.push(`/(tabs)/(library)/${collection.id}`);
   };
 
   const cardBg = isDark ? '#1c1c1e' : '#ffffff';
