@@ -11,6 +11,7 @@ import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useSettings, BIBLE_VERSIONS, type BibleVersion } from '@/lib/settings';
+import { useAuth } from '@/lib/auth';
 
 interface SettingsSectionProps {
   title: string;
@@ -129,7 +130,16 @@ function VersionPicker({ value, onChange }: VersionPickerProps) {
 export default function SettingsScreen() {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
+  const isDark = colorScheme === 'dark';
   const { settings, loading, setBibleVersion } = useSettings();
+  const { user, signOut } = useAuth();
+  const [signingOut, setSigningOut] = React.useState(false);
+
+  const handleSignOut = async () => {
+    setSigningOut(true);
+    await signOut();
+    setSigningOut(false);
+  };
 
   const selectedVersion = BIBLE_VERSIONS.find(
     (v) => v.value === settings.bibleVersion
@@ -163,6 +173,38 @@ export default function SettingsScreen() {
               onChange={setBibleVersion}
             />
           </SettingsRow>
+        </SettingsSection>
+
+        {/* Account */}
+        <SettingsSection title="ACCOUNT">
+          <SettingsRow
+            icon="person.fill"
+            label="Email"
+            description={user?.email ?? 'Not signed in'}
+          />
+          <Pressable onPress={handleSignOut} disabled={signingOut}>
+            <View
+              style={[
+                styles.row,
+                { borderBottomWidth: 0 },
+              ]}
+            >
+              <View style={styles.rowLeft}>
+                <View
+                  style={[
+                    styles.iconContainer,
+                    { backgroundColor: isDark ? '#2c2c2e' : '#f2f2f7' },
+                  ]}
+                >
+                  <IconSymbol name="rectangle.portrait.and.arrow.right" size={20} color="#ef4444" />
+                </View>
+                <View style={styles.labelContainer}>
+                  <Text style={[styles.label, { color: '#ef4444' }]}>Sign Out</Text>
+                </View>
+              </View>
+              {signingOut && <ActivityIndicator size="small" color="#ef4444" />}
+            </View>
+          </Pressable>
         </SettingsSection>
 
         {/* About */}
