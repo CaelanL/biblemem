@@ -4,10 +4,10 @@ import * as Haptics from 'expo-haptics';
 import { router } from 'expo-router';
 import {
   getSavedVerses,
-  updateVerseProgress,
   type SavedVerse,
   type Difficulty as StorageDifficulty,
 } from '@/lib/storage';
+import { syncUpdateProgress } from '@/lib/sync';
 import {
   type Chunk,
   type Difficulty,
@@ -150,9 +150,13 @@ export function useStudySession({
       allAlignments.set(currentIndex, alignment);
       const finalScoreValue = calculateFinalScore(allAlignments);
 
-      // Update progress in storage
+      // Update progress in storage and sync to server
       if (verseId && difficulty) {
-        updateVerseProgress(verseId, difficulty as StorageDifficulty, finalScoreValue);
+        try {
+          await syncUpdateProgress(verseId, difficulty as StorageDifficulty, finalScoreValue);
+        } catch (e) {
+          console.error('[STUDY] Failed to sync progress:', e);
+        }
       }
 
       setShowResults(true);

@@ -1,13 +1,14 @@
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { AddCollectionModal } from '@/components/library/AddCollectionModal';
+import { SwipeableCollectionCard } from '@/components/library/SwipeableCollectionCard';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import {
   getCollections,
-  createCollection,
   getCollectionVerseCount,
   type Collection,
 } from '@/lib/storage';
+import { syncCreateCollection, syncDeleteCollection } from '@/lib/sync';
 import { router } from 'expo-router';
 import { useCallback, useState } from 'react';
 import {
@@ -58,7 +59,12 @@ export default function LibraryScreen() {
   };
 
   const handleAddCollection = async (name: string) => {
-    await createCollection(name);
+    await syncCreateCollection(name);
+    await loadCollections();
+  };
+
+  const handleDeleteCollection = async (id: string) => {
+    await syncDeleteCollection(id);
     await loadCollections();
   };
 
@@ -66,59 +72,7 @@ export default function LibraryScreen() {
     router.push(`/(tabs)/(library)/${collection.id}`);
   };
 
-  const cardBg = isDark ? '#1c1c1e' : '#ffffff';
-  const borderColor = isDark ? 'rgba(96,165,250,0.3)' : 'rgba(10,126,164,0.25)';
   const primaryColor = isDark ? '#60a5fa' : '#0a7ea4';
-
-  const renderCollectionCard = (collection: CollectionWithCount, index: number) => (
-    <Animated.View
-      key={collection.id}
-      entering={FadeInDown.delay(index * 80).duration(300)}
-    >
-      <Pressable
-        style={[
-          styles.collectionCard,
-          {
-            backgroundColor: cardBg,
-            borderColor,
-          },
-        ]}
-        onPress={() => handleCollectionPress(collection)}
-      >
-        <View style={styles.cardContent}>
-          <View style={styles.cardLeft}>
-            <View
-              style={[
-                styles.iconContainer,
-                {
-                  backgroundColor: collection.isDefault
-                    ? `${primaryColor}15`
-                    : isDark
-                    ? 'rgba(255,255,255,0.1)'
-                    : 'rgba(0,0,0,0.05)',
-                },
-              ]}
-            >
-              <IconSymbol
-                name={collection.isDefault ? 'heart.fill' : 'folder.fill'}
-                size={24}
-                color={collection.isDefault ? primaryColor : colors.icon}
-              />
-            </View>
-            <View style={styles.cardText}>
-              <Text style={[styles.collectionName, { color: colors.text }]}>
-                {collection.name}
-              </Text>
-              <Text style={[styles.verseCount, { color: colors.icon }]}>
-                {collection.verseCount} verse{collection.verseCount !== 1 ? 's' : ''}
-              </Text>
-            </View>
-          </View>
-          <IconSymbol name="chevron.right" size={18} color={colors.icon} />
-        </View>
-      </Pressable>
-    </Animated.View>
-  );
 
   const renderEmptyHint = () => (
     <Animated.View
@@ -151,7 +105,15 @@ export default function LibraryScreen() {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.tint} />
         }
       >
-        {collections.map((collection, index) => renderCollectionCard(collection, index))}
+        {collections.map((collection, index) => (
+          <SwipeableCollectionCard
+            key={collection.id}
+            collection={collection}
+            index={index}
+            onPress={() => handleCollectionPress(collection)}
+            onDelete={() => handleDeleteCollection(collection.id)}
+          />
+        ))}
         {collections.length <= 1 && renderEmptyHint()}
       </ScrollView>
 
@@ -199,43 +161,6 @@ const styles = StyleSheet.create({
   collectionsContainer: {
     padding: 16,
     gap: 12,
-  },
-  collectionCard: {
-    borderRadius: 16,
-    borderWidth: 1,
-    padding: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
-    elevation: 3,
-  },
-  cardContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  cardLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 14,
-  },
-  iconContainer: {
-    width: 48,
-    height: 48,
-    borderRadius: 12,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  cardText: {
-    gap: 2,
-  },
-  collectionName: {
-    fontSize: 17,
-    fontWeight: '600',
-  },
-  verseCount: {
-    fontSize: 14,
   },
   hintContainer: {
     marginTop: 20,

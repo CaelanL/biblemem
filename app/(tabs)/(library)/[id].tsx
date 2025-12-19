@@ -1,15 +1,16 @@
 import { AppHeader } from '@/components/app-header';
 import { IconSymbol } from '@/components/ui/icon-symbol';
+import { SwipeableVerseCard } from '@/components/library/SwipeableVerseCard';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import {
   getCollections,
   getVersesByCollection,
-  deleteVerse,
   formatVerseReference,
   type SavedVerse,
   type Collection,
 } from '@/lib/storage';
+import { syncDeleteVerse } from '@/lib/sync';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useState } from 'react';
 import {
@@ -19,7 +20,6 @@ import {
   Text,
   View,
   RefreshControl,
-  Alert,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
@@ -64,29 +64,11 @@ export default function CollectionScreen() {
     router.push(`/(tabs)/(library)/setup/${verse.id}`);
   };
 
-  const handleVerseLongPress = (verse: SavedVerse) => {
-    Alert.alert(
-      formatVerseReference(verse),
-      'What would you like to do?',
-      [
-        { text: 'Study', onPress: () => router.push(`/(tabs)/(library)/setup/${verse.id}`) },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: () => handleDeleteVerse(verse),
-        },
-        { text: 'Cancel', style: 'cancel' },
-      ]
-    );
-  };
-
-  const handleDeleteVerse = async (verse: SavedVerse) => {
-    await deleteVerse(verse.id);
+  const handleDeleteVerse = async (verseId: string) => {
+    await syncDeleteVerse(verseId);
     await loadData();
   };
 
-  const cardBg = isDark ? '#1c1c1e' : '#ffffff';
-  const borderColor = isDark ? 'rgba(96,165,250,0.3)' : 'rgba(10,126,164,0.25)';
   const primaryColor = isDark ? '#60a5fa' : '#0a7ea4';
 
   const renderEmptyState = () => (
@@ -108,40 +90,6 @@ export default function CollectionScreen() {
     </View>
   );
 
-  const renderVerseCard = (verse: SavedVerse, index: number) => (
-    <Animated.View
-      key={verse.id}
-      entering={FadeInDown.delay(index * 60).duration(300)}
-    >
-      <Pressable
-        style={[
-          styles.verseCard,
-          {
-            backgroundColor: cardBg,
-            borderColor,
-          },
-        ]}
-        onPress={() => handleVersePress(verse)}
-        onLongPress={() => handleVerseLongPress(verse)}
-      >
-        <View style={styles.cardContent}>
-          <View style={[styles.iconContainer, { backgroundColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)' }]}>
-            <IconSymbol name="book.fill" size={20} color={colors.icon} />
-          </View>
-          <View style={styles.cardText}>
-            <Text style={[styles.verseReference, { color: primaryColor }]}>
-              {formatVerseReference(verse)}
-              <Text style={[styles.versionBadge, { color: colors.icon }]}> • {verse.version}</Text>
-            </Text>
-            <Text style={[styles.versePreview, { color: colors.text }]} numberOfLines={2}>
-              {verse.text}
-            </Text>
-          </View>
-        </View>
-      </Pressable>
-    </Animated.View>
-  );
-
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <AppHeader
@@ -160,7 +108,17 @@ export default function CollectionScreen() {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.tint} />
         }
       >
-        {verses.length === 0 ? renderEmptyState() : verses.map((v, i) => renderVerseCard(v, i))}
+        {verses.length === 0
+          ? renderEmptyState()
+          : verses.map((v, i) => (
+              <SwipeableVerseCard
+                key={v.id}
+                verse={v}
+                index={i}
+                onPress={() => handleVersePress(v)}
+                onDelete={() => handleDeleteVerse(v.id)}
+              />
+            ))}
       </ScrollView>
     </View>
   );
@@ -218,42 +176,5 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: '600',
-  },
-  verseCard: {
-    borderRadius: 16,
-    borderWidth: 1,
-    padding: 14,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06,
-    shadowRadius: 6,
-    elevation: 2,
-  },
-  cardContent: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 12,
-  },
-  iconContainer: {
-    width: 40,
-    height: 40,
-    borderRadius: 10,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  cardText: {
-    flex: 1,
-    gap: 4,
-  },
-  verseReference: {
-    fontSize: 15,
-    fontWeight: '600',
-  },
-  versionBadge: {
-    fontWeight: '400',
-  },
-  versePreview: {
-    fontSize: 15,
-    lineHeight: 21,
   },
 });

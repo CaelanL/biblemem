@@ -3,7 +3,8 @@ import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { normalizeBookName } from '@/lib/bible';
-import { saveVerse, type BibleVersion } from '@/lib/storage';
+import { type BibleVersion } from '@/lib/storage';
+import { syncSaveVerse } from '@/lib/sync';
 import { useSettings } from '@/lib/settings';
 import { fetchVerse } from '@/lib/api';
 import bibleData from '@/assets/bible/esv.json';
@@ -212,7 +213,7 @@ export default function VerseSelectScreen() {
 
       const { text } = await fetchVerse(reference, selectedVersion);
 
-      await saveVerse({
+      await syncSaveVerse({
         book: bookName,
         chapter: chapterNum,
         verseStart: min,
