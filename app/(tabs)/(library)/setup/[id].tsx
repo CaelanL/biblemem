@@ -1,7 +1,8 @@
+import { AppHeader } from '@/components/app-header';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { getSavedVerses, formatVerseReference, type SavedVerse } from '@/lib/storage';
-import { router, Stack, useLocalSearchParams } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState, useCallback } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import {
@@ -32,7 +33,6 @@ export default function StudySetupScreen() {
   const totalVerses = verse ? verse.verseEnd - verse.verseStart + 1 : 1;
   // Available chunk sizes (1, 2, 3... up to total verses, max 5)
   const maxChunkSize = Math.min(totalVerses, 5);
-  const chunkSizeOptions = Array.from({ length: maxChunkSize }, (_, i) => i + 1);
 
   // Reload verse data when screen comes into focus (to get updated progress)
   useFocusEffect(
@@ -63,9 +63,9 @@ export default function StudySetupScreen() {
 
   const handleStartSession = () => {
     if (!verse) return;
-    router.push(`/study/session?id=${id}&difficulty=${difficulty}&chunkSize=${chunkSize}`);
+    // Session is at root level, outside tabs
+    router.push(`/session?id=${id}&difficulty=${difficulty}&chunkSize=${chunkSize}`);
   };
-
 
   const buttonBg = isDark ? '#3b82f6' : '#0a7ea4';
 
@@ -80,6 +80,7 @@ export default function StudySetupScreen() {
   if (!verse) {
     return (
       <View style={[styles.container, styles.centered, { backgroundColor: colors.background }]}>
+        <AppHeader title="Setup" />
         <Text style={{ color: colors.text }}>Verse not found</Text>
       </View>
     );
@@ -87,125 +88,121 @@ export default function StudySetupScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
-      <Stack.Screen
-        options={{
-          title: 'Setup',
-          headerStyle: { backgroundColor: colors.background },
-          headerTintColor: colors.text,
-        }}
-      />
+      <AppHeader title="Setup" />
 
-      {/* Verse Preview */}
-      <View style={[styles.previewCard, { backgroundColor: isDark ? '#1e1e1e' : '#f5f5f5' }]}>
-        <Text style={[styles.reference, { color: isDark ? '#60a5fa' : colors.tint }]}>
-          {formatVerseReference(verse)}
-        </Text>
-        <Text style={[styles.previewText, { color: colors.text }]} numberOfLines={4}>
-          {verse.text}
-        </Text>
-      </View>
-
-      {/* Difficulty Selection */}
-      <View style={styles.section}>
-        <Text style={[styles.sectionTitle, { color: colors.text }]}>Difficulty</Text>
-        <View style={[styles.segmentedControl, { backgroundColor: isDark ? '#1e1e1e' : '#e5e5e5' }]}>
-          {(['easy', 'medium', 'hard'] as Difficulty[]).map((level) => (
-            <Pressable
-              key={level}
-              style={[
-                styles.segment,
-                difficulty === level && { backgroundColor: buttonBg },
-              ]}
-              onPress={() => setDifficulty(level)}
-            >
-              <Text
-                style={[
-                  styles.segmentText,
-                  { color: difficulty === level ? '#fff' : colors.text },
-                ]}
-              >
-                {level.charAt(0).toUpperCase() + level.slice(1)}
-              </Text>
-              <Text
-                style={[
-                  styles.segmentSubtext,
-                  { color: difficulty === level ? 'rgba(255,255,255,0.7)' : colors.icon },
-                ]}
-              >
-                {level === 'easy' && 'All words'}
-                {level === 'medium' && 'Some hidden'}
-                {level === 'hard' && 'No words'}
-              </Text>
-            </Pressable>
-          ))}
+      <View style={styles.content}>
+        {/* Verse Preview */}
+        <View style={[styles.previewCard, { backgroundColor: isDark ? '#1e1e1e' : '#f5f5f5' }]}>
+          <Text style={[styles.reference, { color: isDark ? '#60a5fa' : colors.tint }]}>
+            {formatVerseReference(verse)}
+          </Text>
+          <Text style={[styles.previewText, { color: colors.text }]} numberOfLines={4}>
+            {verse.text}
+          </Text>
         </View>
-      </View>
 
-      {/* Progress Stats */}
-      <View style={styles.progressSection}>
-        <Text style={[styles.sectionTitle, { color: colors.text }]}>Your Progress</Text>
-        <View style={styles.progressRow}>
-          {(['easy', 'medium', 'hard'] as Difficulty[]).map((level) => {
-            const progress = verse.progress[level];
-            const hasScore = progress.bestAccuracy !== null;
-            return (
-              <View key={level} style={styles.progressItem}>
-                <Text style={[styles.progressLabel, { color: colors.icon }]}>
+        {/* Difficulty Selection */}
+        <View style={styles.section}>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>Difficulty</Text>
+          <View style={[styles.segmentedControl, { backgroundColor: isDark ? '#1e1e1e' : '#e5e5e5' }]}>
+            {(['easy', 'medium', 'hard'] as Difficulty[]).map((level) => (
+              <Pressable
+                key={level}
+                style={[
+                  styles.segment,
+                  difficulty === level && { backgroundColor: buttonBg },
+                ]}
+                onPress={() => setDifficulty(level)}
+              >
+                <Text
+                  style={[
+                    styles.segmentText,
+                    { color: difficulty === level ? '#fff' : colors.text },
+                  ]}
+                >
                   {level.charAt(0).toUpperCase() + level.slice(1)}
                 </Text>
                 <Text
                   style={[
-                    styles.progressValue,
-                    {
-                      color: progress.completed
-                        ? '#22c55e'
-                        : hasScore
-                        ? '#f59e0b'
-                        : colors.icon,
-                    },
+                    styles.segmentSubtext,
+                    { color: difficulty === level ? 'rgba(255,255,255,0.7)' : colors.icon },
                   ]}
                 >
-                  {hasScore ? `${progress.bestAccuracy}%` : '--'}
-                  {progress.completed && ' ✓'}
+                  {level === 'easy' && 'All words'}
+                  {level === 'medium' && 'Some hidden'}
+                  {level === 'hard' && 'No words'}
                 </Text>
-              </View>
-            );
-          })}
+              </Pressable>
+            ))}
+          </View>
         </View>
-      </View>
 
-      {/* Chunk Size Selection - only show if multiple verses */}
-      {totalVerses > 1 && (
-        <View style={[styles.chunkRow, { zIndex: 1000 }]}>
-          <Text style={[styles.chunkLabel, { color: colors.text }]}>Verses per chunk</Text>
-          <DropDownPicker
-            open={dropdownOpen}
-            value={chunkSize}
-            items={dropdownItems}
-            setOpen={setDropdownOpen}
-            setValue={setChunkSize}
-            setItems={setDropdownItems}
-            style={[styles.dropdown, { backgroundColor: isDark ? '#1e1e1e' : '#e5e5e5', borderWidth: 0 }]}
-            dropDownContainerStyle={[styles.dropdownContainer, { backgroundColor: isDark ? '#1e1e1e' : '#e5e5e5', borderWidth: 0 }]}
-            textStyle={{ color: colors.text, fontSize: 16, fontWeight: '600' }}
-            arrowIconStyle={{ tintColor: colors.icon } as any}
-            tickIconStyle={{ tintColor: colors.text } as any}
-            listItemLabelStyle={{ color: colors.text }}
-            selectedItemContainerStyle={{ backgroundColor: isDark ? '#2e2e2e' : '#d5d5d5' }}
-            containerStyle={{ width: 60 }}
-            showTickIcon={false}
-          />
+        {/* Progress Stats */}
+        <View style={styles.progressSection}>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>Your Progress</Text>
+          <View style={styles.progressRow}>
+            {(['easy', 'medium', 'hard'] as Difficulty[]).map((level) => {
+              const progress = verse.progress[level];
+              const hasScore = progress.bestAccuracy !== null;
+              return (
+                <View key={level} style={styles.progressItem}>
+                  <Text style={[styles.progressLabel, { color: colors.icon }]}>
+                    {level.charAt(0).toUpperCase() + level.slice(1)}
+                  </Text>
+                  <Text
+                    style={[
+                      styles.progressValue,
+                      {
+                        color: progress.completed
+                          ? '#22c55e'
+                          : hasScore
+                          ? '#f59e0b'
+                          : colors.icon,
+                      },
+                    ]}
+                  >
+                    {hasScore ? `${progress.bestAccuracy}%` : '--'}
+                    {progress.completed && ' ✓'}
+                  </Text>
+                </View>
+              );
+            })}
+          </View>
         </View>
-      )}
 
-      {/* Start Button */}
-      <View style={styles.bottomSection}>
-        <Pressable
-          style={[styles.startButton, { backgroundColor: buttonBg }]}
-          onPress={handleStartSession}
-        >
-          <Text style={styles.startButtonText}>Start Session</Text>
-        </Pressable>
+        {/* Chunk Size Selection - only show if multiple verses */}
+        {totalVerses > 1 && (
+          <View style={[styles.chunkRow, { zIndex: 1000 }]}>
+            <Text style={[styles.chunkLabel, { color: colors.text }]}>Verses per chunk</Text>
+            <DropDownPicker
+              open={dropdownOpen}
+              value={chunkSize}
+              items={dropdownItems}
+              setOpen={setDropdownOpen}
+              setValue={setChunkSize}
+              setItems={setDropdownItems}
+              style={[styles.dropdown, { backgroundColor: isDark ? '#1e1e1e' : '#e5e5e5', borderWidth: 0 }]}
+              dropDownContainerStyle={[styles.dropdownContainer, { backgroundColor: isDark ? '#1e1e1e' : '#e5e5e5', borderWidth: 0 }]}
+              textStyle={{ color: colors.text, fontSize: 16, fontWeight: '600' }}
+              arrowIconStyle={{ tintColor: colors.icon } as any}
+              tickIconStyle={{ tintColor: colors.text } as any}
+              listItemLabelStyle={{ color: colors.text }}
+              selectedItemContainerStyle={{ backgroundColor: isDark ? '#2e2e2e' : '#d5d5d5' }}
+              containerStyle={{ width: 60 }}
+              showTickIcon={false}
+            />
+          </View>
+        )}
+
+        {/* Start Button */}
+        <View style={styles.bottomSection}>
+          <Pressable
+            style={[styles.startButton, { backgroundColor: buttonBg }]}
+            onPress={handleStartSession}
+          >
+            <Text style={styles.startButtonText}>Start Session</Text>
+          </Pressable>
+        </View>
       </View>
     </View>
   );
@@ -213,6 +210,9 @@ export default function StudySetupScreen() {
 
 const styles = StyleSheet.create({
   container: {
+    flex: 1,
+  },
+  content: {
     flex: 1,
     padding: 20,
   },

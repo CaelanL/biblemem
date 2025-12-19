@@ -1,3 +1,4 @@
+import { AppHeader } from '@/components/app-header';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
@@ -9,7 +10,7 @@ import {
   type SavedVerse,
   type Collection,
 } from '@/lib/storage';
-import { router, useLocalSearchParams, Stack } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useState } from 'react';
 import {
   Pressable,
@@ -56,12 +57,11 @@ export default function CollectionScreen() {
   };
 
   const handleAddVerse = () => {
-    // Pass collection ID so verse gets added to this collection
-    router.push(`/add?collectionId=${id}`);
+    router.push(`/(tabs)/(library)/add?collectionId=${id}`);
   };
 
   const handleVersePress = (verse: SavedVerse) => {
-    router.push(`/study/${verse.id}`);
+    router.push(`/(tabs)/(library)/setup/${verse.id}`);
   };
 
   const handleVerseLongPress = (verse: SavedVerse) => {
@@ -69,7 +69,7 @@ export default function CollectionScreen() {
       formatVerseReference(verse),
       'What would you like to do?',
       [
-        { text: 'Study', onPress: () => router.push(`/study/${verse.id}`) },
+        { text: 'Study', onPress: () => router.push(`/(tabs)/(library)/setup/${verse.id}`) },
         {
           text: 'Delete',
           style: 'destructive',
@@ -144,20 +144,12 @@ export default function CollectionScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
-      <Stack.Screen
-        options={{
-          title: collection?.name || 'Collection',
-          headerStyle: { backgroundColor: colors.background },
-          headerTintColor: colors.text,
-          headerRight: () => (
-            <Pressable
-              style={[styles.headerButton, { backgroundColor: primaryColor }]}
-              onPress={handleAddVerse}
-            >
-              <IconSymbol name="plus" size={16} color="#fff" />
-              <Text style={styles.headerButtonText}>Add</Text>
-            </Pressable>
-          ),
+      <AppHeader
+        title={collection?.name || 'Collection'}
+        rightButton={{
+          label: 'Add',
+          icon: 'plus',
+          onPress: handleAddVerse,
         }}
       />
 
@@ -177,19 +169,6 @@ export default function CollectionScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-  },
-  headerButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
-  },
-  headerButtonText: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '600',
   },
   scrollView: {
     flex: 1,

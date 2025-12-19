@@ -17,7 +17,7 @@ export default function TabLayout() {
         tabBarButton: HapticTab,
       }}>
       <Tabs.Screen
-        name="index"
+        name="(library)"
         options={{
           title: 'Library',
           tabBarIcon: ({ color }) => <IconSymbol size={28} name="books.vertical.fill" color={color} />,

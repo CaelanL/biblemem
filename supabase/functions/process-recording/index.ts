@@ -2,22 +2,17 @@ import { serve } from "https://deno.land/std@0.208.0/http/server.ts";
 import { getAuthUser } from "../_shared/auth.ts";
 import { handleCors } from "../_shared/cors.ts";
 import {
-  unauthorized,
   badRequest,
   jsonResponse,
   serverError,
+  unauthorized,
 } from "../_shared/errors.ts";
 import {
   checkTranscriptionUsage,
-  checkEvaluateUsage,
-  recordTranscriptionUsage,
-  recordEvaluateUsage,
   rateLimitResponse,
+  recordEvaluateUsage,
+  recordTranscriptionUsage
 } from "../_shared/usage.ts";
-import {
-  acquireTranscriptionLock,
-  releaseTranscriptionLock,
-} from "../_shared/concurrency.ts";
 
 const SONIOX_API_KEY = Deno.env.get("SONIOX_API_KEY");
 const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY");
@@ -76,32 +71,23 @@ serve(async (req) => {
     }
 
     // Check quotas
+    const quotaStart = Date.now();
     const transcribeUsage = await checkTranscriptionUsage(user.id, durationSeconds);
     if (!transcribeUsage.allowed) {
       return rateLimitResponse(transcribeUsage.used, transcribeUsage.limit);
     }
 
-    const evaluateUsage = await checkEvaluateUsage(user.id);
-    if (!evaluateUsage.allowed) {
-      return rateLimitResponse(evaluateUsage.used, evaluateUsage.limit);
-    }
-
-    // Acquire concurrency lock
-    const hasLock = await acquireTranscriptionLock(user.id);
-    if (!hasLock) {
-      return jsonResponse(
-        {
-          error: "Transcription already in progress",
-          code: "TRANSCRIPTION_IN_PROGRESS",
-        },
-        429
-      );
-    }
+    //const evaluateUsage = await checkEvaluateUsage(user.id);
+    //if (!evaluateUsage.allowed) {
+    //  return rateLimitResponse(evaluateUsage.used, evaluateUsage.limit);
+    //}
+    const quotaMs = Date.now() - quotaStart;
 
     console.log(`[PROCESS] User: ${user.id.slice(0, 8)}..., Duration: ${durationSeconds}s, Size: ${(audioBlob.size / 1024).toFixed(1)}KB`);
+    console.log(`[PROCESS] Quota check: ${quotaMs}ms`);
 
     const transcribeStart = Date.now();
-    const transcription = await transcribeWithSoniox(audioBlob);
+    const transcription = await transcribeWithSoniox(audioBlob, actualVerse);
     const transcribeMs = Date.now() - transcribeStart;
 
     const rawWordCount = transcription.split(/\s+/).filter(Boolean).length;
@@ -109,46 +95,59 @@ serve(async (req) => {
     console.log(`[PROCESS] Raw (${rawWordCount} words, ${transcription.length} chars): "${transcription.slice(0, 200)}${transcription.length > 200 ? "..." : ""}"`);
 
     // Record transcription usage
+    const recordStart = Date.now();
     await recordTranscriptionUsage(user.id, durationSeconds);
+    const recordMs = Date.now() - recordStart;
+    console.log(`[PROCESS] Usage recorded: ${recordMs}ms`);
 
-    // ========== CLEANING ==========
+    // ========== CLEANING (disabled - skip LLM, use raw transcription) ==========
+    const CLEANING_ENABLED = false;
     let cleanedTranscription: string;
     let cleaningUsed = false;
 
-    try {
-      const cleanStart = Date.now();
-      const cleanResult = await cleanTranscription(actualVerse, transcription);
-      const cleanMs = Date.now() - cleanStart;
+    if (CLEANING_ENABLED) {
+      try {
+        const cleanStart = Date.now();
+        const cleanResult = await cleanTranscription(actualVerse, transcription);
+        const cleanMs = Date.now() - cleanStart;
 
-      cleanedTranscription = cleanResult.text;
+        cleanedTranscription = cleanResult.text;
 
-      // Check if cleaning actually ran (not just returned raw)
-      cleaningUsed = cleanedTranscription !== transcription;
+        // Cleaning used = OpenAI succeeded AND returned non-empty
+        // (empty means LLM had nothing to clean, e.g. empty transcript)
+        cleaningUsed = cleanResult.model !== undefined && cleanedTranscription.trim().length > 0;
 
-      if (cleaningUsed) {
-        await recordEvaluateUsage(user.id);
-        const cleanedWordCount = cleanedTranscription.split(/\s+/).filter(Boolean).length;
-        const wordsRemoved = rawWordCount - cleanedWordCount;
+        if (cleaningUsed) {
+          await recordEvaluateUsage(user.id);
+          const cleanedWordCount = cleanedTranscription.split(/\s+/).filter(Boolean).length;
+          const wordsRemoved = rawWordCount - cleanedWordCount;
 
-        console.log(`[PROCESS] Cleaning: ${cleanMs}ms`);
-        if (cleanResult.model) {
-          console.log(`[PROCESS] Model: ${cleanResult.model}`);
+          console.log(`[PROCESS] Cleaning: ${cleanMs}ms`);
+          if (cleanResult.model) {
+            console.log(`[PROCESS] Model: ${cleanResult.model}`);
+          }
+          if (cleanResult.usage) {
+            console.log(`[PROCESS] Tokens - Input: ${cleanResult.usage.inputTokens}, Output: ${cleanResult.usage.outputTokens}, Reasoning: ${cleanResult.usage.reasoningTokens}, Total: ${cleanResult.usage.totalTokens}`);
+          }
+          console.log(`[PROCESS] Cleaned (${cleanedWordCount} words, ${cleanedTranscription.length} chars, ${wordsRemoved} words removed): "${cleanedTranscription.slice(0, 200)}${cleanedTranscription.length > 200 ? "..." : ""}"`);
+        } else {
+          console.log(`[PROCESS] Cleaning: returned empty (nothing to clean)`);
         }
-        if (cleanResult.usage) {
-          console.log(`[PROCESS] Tokens - Input: ${cleanResult.usage.inputTokens}, Output: ${cleanResult.usage.outputTokens}, Total: ${cleanResult.usage.totalTokens}`);
-        }
-        console.log(`[PROCESS] Cleaned (${cleanedWordCount} words, ${cleanedTranscription.length} chars, ${wordsRemoved} words removed): "${cleanedTranscription.slice(0, 200)}${cleanedTranscription.length > 200 ? "..." : ""}"`);
-      } else {
-        console.log(`[PROCESS] Cleaning skipped or returned raw`);
+      } catch (cleanError) {
+        console.error("[PROCESS] Cleaning failed, using raw:", cleanError);
+        cleanedTranscription = transcription;
+        cleaningUsed = false;
       }
-    } catch (cleanError) {
-      console.error("[PROCESS] Cleaning failed, using raw:", cleanError);
+    } else {
+      // Cleaning disabled - pass raw transcription through
       cleanedTranscription = transcription;
       cleaningUsed = false;
+      console.log(`[PROCESS] Cleaning: skipped (disabled)`);
     }
 
     const totalMs = Date.now() - requestStart;
-    console.log(`[PROCESS] Complete - Total: ${totalMs}ms (Transcribe: ${transcribeMs}ms, Clean: ${totalMs - transcribeMs - 50}ms approx)`);
+    const dbOverhead = quotaMs + recordMs;
+    console.log(`[PROCESS] Complete - Total: ${totalMs}ms (Transcribe: ${transcribeMs}ms, DB: ${dbOverhead}ms)`);
 
     return jsonResponse({
       transcription,
@@ -158,21 +157,21 @@ serve(async (req) => {
   } catch (error) {
     console.error("[PROCESS] Error:", error);
     return serverError("Processing failed");
-  } finally {
-    // Always release the lock
-    await releaseTranscriptionLock(user.id);
   }
 });
 
 /**
  * Transcribe audio using Soniox async API
+ * @param audioBlob - The audio file to transcribe
+ * @param verseText - The expected verse text for context (improves accuracy)
  */
-async function transcribeWithSoniox(audioBlob: Blob): Promise<string> {
+async function transcribeWithSoniox(audioBlob: Blob, verseText: string): Promise<string> {
   if (!SONIOX_API_KEY) {
     throw new Error("SONIOX_API_KEY not configured");
   }
 
   // Step 1: Upload audio file
+  const uploadStart = Date.now();
   console.log(`[PROCESS] Soniox upload - Size: ${(audioBlob.size / 1024).toFixed(1)}KB, Type: ${audioBlob.type || "unknown"}`);
 
   const uploadForm = new FormData();
@@ -192,9 +191,12 @@ async function transcribeWithSoniox(audioBlob: Blob): Promise<string> {
 
   const uploadResult = await uploadRes.json();
   const fileId = uploadResult.id;
-  console.log(`[PROCESS] Soniox file uploaded - ID: ${fileId}`);
+  const uploadMs = Date.now() - uploadStart;
+  console.log(`[PROCESS] Soniox upload complete: ${uploadMs}ms, ID: ${fileId}`);
 
-  // Step 2: Create transcription job
+  // Step 2: Create transcription job with verse context
+  const jobStart = Date.now();
+  console.log(`[PROCESS] Soniox context: ${verseText.length} chars`);
   const jobRes = await fetch("https://api.soniox.com/v1/transcriptions", {
     method: "POST",
     headers: {
@@ -203,8 +205,15 @@ async function transcribeWithSoniox(audioBlob: Blob): Promise<string> {
     },
     body: JSON.stringify({
       file_id: fileId,
-      model: "stt-async-preview",
+      model: "stt-async-v3",
       language_hints: ["en"],
+      context: {
+        general: [
+          { key: "domain", value: "Bible" },
+          { key: "topic", value: "Bible verse memory recitation attempt" },
+        ],
+        text: verseText,
+      },
     }),
   });
 
@@ -215,8 +224,11 @@ async function transcribeWithSoniox(audioBlob: Blob): Promise<string> {
   }
 
   const { id: transcriptionId } = await jobRes.json();
+  const jobMs = Date.now() - jobStart;
+  console.log(`[PROCESS] Soniox job created: ${jobMs}ms`);
 
   // Step 3: Poll for completion (max 60 seconds)
+  const pollStart = Date.now();
   let attempts = 0;
   const maxAttempts = 60;
 
@@ -249,6 +261,9 @@ async function transcribeWithSoniox(audioBlob: Blob): Promise<string> {
   if (attempts >= maxAttempts) {
     throw new Error("Transcription timed out");
   }
+
+  const pollMs = Date.now() - pollStart;
+  console.log(`[PROCESS] Soniox polling complete: ${pollMs}ms (${attempts + 1} polls)`);
 
   // Step 4: Get transcript
   const transcriptRes = await fetch(
@@ -302,10 +317,13 @@ CLEANING RULES:
 - Remove self-corrections ("wait no", "I mean", "sorry")
 - KEEP intentional repetition that matches the actual verse (like "holy, holy, holy")
 - KEEP their word choices even if wrong - don't correct to match the actual verse
+- RETURN EMPTY STRING (return nothing) IF empty transcript, and unable to clean.
+- DO NOT ADD words user did not say in transcript
 
 Return ONLY the cleaned transcription text. No explanations, no quotes, no labels.`;
 
   try {
+    const openaiStart = Date.now();
     const response = await fetch("https://api.openai.com/v1/responses", {
       method: "POST",
       headers: {
@@ -320,8 +338,8 @@ Return ONLY the cleaned transcription text. No explanations, no quotes, no label
             content: [{ type: "input_text", text: prompt }],
           },
         ],
-        max_output_tokens: 1000,
-        reasoning: { effort: "minimal" },
+        max_output_tokens: 3000,
+        reasoning: { effort: "low" },
       }),
     });
 
@@ -333,6 +351,8 @@ Return ONLY the cleaned transcription text. No explanations, no quotes, no label
     }
 
     const result = await response.json();
+    const openaiMs = Date.now() - openaiStart;
+    console.log(`[PROCESS] OpenAI request: ${openaiMs}ms`);
 
     // Extract text from Responses API format
     const messageOutput = result.output?.find(
@@ -346,6 +366,7 @@ Return ONLY the cleaned transcription text. No explanations, no quotes, no label
     const usage = result.usage ? {
       inputTokens: result.usage.input_tokens || 0,
       outputTokens: result.usage.output_tokens || 0,
+      reasoningTokens: result.usage.output_tokens_details?.reasoning_tokens || 0,
       totalTokens: result.usage.total_tokens || (result.usage.input_tokens || 0) + (result.usage.output_tokens || 0),
     } : undefined;
 
