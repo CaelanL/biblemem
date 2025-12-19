@@ -90,7 +90,7 @@ export function useStudySession({
       const found = verses.find((v) => v.id === verseId);
       if (found) {
         setVerse(found);
-        const parsedChunks = parseVerseIntoChunks(found, difficulty, chunkSize);
+        const parsedChunks = parseVerseIntoChunks(found, difficulty, chunkSize, Math.floor(Math.random() * 2));
         setChunks(parsedChunks);
       }
       setLoading(false);

@@ -1,7 +1,9 @@
 import { AppHeader } from '@/components/app-header';
+import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { getSavedVerses, formatVerseReference, type SavedVerse } from '@/lib/storage';
+import { toSuperscript, getVerseText } from '@/lib/study-chunks';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState, useCallback } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
@@ -11,7 +13,10 @@ import {
   Text,
   View,
   ActivityIndicator,
+  Modal,
+  ScrollView,
 } from 'react-native';
+import { BlurView } from 'expo-blur';
 import DropDownPicker from 'react-native-dropdown-picker';
 
 type Difficulty = 'easy' | 'medium' | 'hard';
@@ -28,6 +33,7 @@ export default function StudySetupScreen() {
   const [loading, setLoading] = useState(true);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [dropdownItems, setDropdownItems] = useState<{label: string; value: number}[]>([]);
+  const [expanded, setExpanded] = useState(false);
 
   // Calculate total verses in this passage
   const totalVerses = verse ? verse.verseEnd - verse.verseStart + 1 : 1;
@@ -68,6 +74,26 @@ export default function StudySetupScreen() {
   };
 
   const buttonBg = isDark ? '#3b82f6' : '#0a7ea4';
+  const accentColor = isDark ? '#60a5fa' : colors.tint;
+  const badgeBg = isDark ? 'rgba(96,165,250,0.15)' : 'rgba(10,126,164,0.1)';
+
+  // Build annotated text with superscript verse numbers (same as VerseCard)
+  const getAnnotatedText = () => {
+    if (!verse) return '';
+    const total = verse.verseEnd - verse.verseStart + 1;
+
+    if (total === 1) {
+      return `${toSuperscript(verse.verseStart)}${verse.text}`;
+    }
+
+    // Multi-verse: annotate each verse
+    const parts: string[] = [];
+    for (let i = 0; i < total; i++) {
+      const verseText = getVerseText(verse.text, i, total);
+      parts.push(`${toSuperscript(verse.verseStart + i)}${verseText}`);
+    }
+    return parts.join(' ');
+  };
 
   if (loading) {
     return (
@@ -93,13 +119,54 @@ export default function StudySetupScreen() {
       <View style={styles.content}>
         {/* Verse Preview */}
         <View style={[styles.previewCard, { backgroundColor: isDark ? '#1e1e1e' : '#f5f5f5' }]}>
-          <Text style={[styles.reference, { color: isDark ? '#60a5fa' : colors.tint }]}>
-            {formatVerseReference(verse)}
-          </Text>
+          <View style={[styles.referenceBadge, { backgroundColor: badgeBg }]}>
+            <IconSymbol name="book.fill" size={14} color={accentColor} />
+            <Text style={[styles.referenceBadgeText, { color: accentColor }]}>
+              {formatVerseReference(verse)}
+            </Text>
+          </View>
+          <Pressable
+            style={[styles.expandButton, { backgroundColor: badgeBg }]}
+            onPress={() => setExpanded(true)}
+          >
+            <IconSymbol name="arrow.up.left.and.arrow.down.right" size={14} color={accentColor} />
+          </Pressable>
           <Text style={[styles.previewText, { color: colors.text }]} numberOfLines={4}>
             {verse.text}
           </Text>
         </View>
+
+        {/* Expanded Modal */}
+        <Modal
+          visible={expanded}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setExpanded(false)}
+        >
+          <BlurView intensity={isDark ? 40 : 80} tint={isDark ? 'dark' : 'light'} style={styles.blurOverlay}>
+            <View style={[styles.modalCard, { backgroundColor: isDark ? '#1c1c1e' : '#ffffff' }]}>
+              {/* Modal Header */}
+              <View style={styles.modalHeader}>
+                <View style={[styles.referenceBadge, { backgroundColor: badgeBg, marginBottom: 0 }]}>
+                  <IconSymbol name="book.fill" size={14} color={accentColor} />
+                  <Text style={[styles.referenceBadgeText, { color: accentColor }]}>
+                    {formatVerseReference(verse)}
+                  </Text>
+                </View>
+                <Pressable onPress={() => setExpanded(false)} hitSlop={8}>
+                  <IconSymbol name="xmark.circle.fill" size={28} color={colors.icon} />
+                </Pressable>
+              </View>
+
+              {/* Full scrollable verse text */}
+              <ScrollView style={styles.modalScroll} showsVerticalScrollIndicator={false}>
+                <Text style={[styles.modalVerseText, { color: colors.text }]}>
+                  {getAnnotatedText()}
+                </Text>
+              </ScrollView>
+            </View>
+          </BlurView>
+        </Modal>
 
         {/* Difficulty Selection */}
         <View style={styles.section}>
@@ -225,14 +292,59 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     marginBottom: 24,
   },
-  reference: {
-    fontSize: 15,
+  referenceBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+    marginBottom: 12,
+  },
+  referenceBadgeText: {
+    fontSize: 14,
     fontWeight: '600',
-    marginBottom: 8,
+  },
+  expandButton: {
+    position: 'absolute',
+    top: 12,
+    right: 12,
+    padding: 8,
+    borderRadius: 8,
   },
   previewText: {
     fontSize: 16,
     lineHeight: 24,
+  },
+  // Modal styles
+  blurOverlay: {
+    flex: 1,
+    justifyContent: 'center',
+    padding: 20,
+  },
+  modalCard: {
+    borderRadius: 20,
+    maxHeight: '80%',
+    padding: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  modalScroll: {
+    flexGrow: 0,
+  },
+  modalVerseText: {
+    fontSize: 19,
+    lineHeight: 30,
   },
   section: {
     marginBottom: 24,
