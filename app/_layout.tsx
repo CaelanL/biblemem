@@ -9,6 +9,13 @@ import { View, ActivityIndicator } from 'react-native';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { migrateLocalDataToServer } from '@/lib/sync';
 import { AuthProvider, useAuth } from '@/lib/auth';
+import { clearSessionCache, getSessionCacheStats } from '@/lib/api/bible';
+
+// Expose dev tools to console
+if (__DEV__) {
+  (global as any).clearCache = clearSessionCache;
+  (global as any).cacheStats = getSessionCacheStats;
+}
 
 export const unstable_settings = {
   anchor: '(tabs)',

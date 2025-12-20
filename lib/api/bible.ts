@@ -1,4 +1,18 @@
 import { getAuthToken, getSupabaseUrl } from "./client";
+import {
+  getChapterFromSession,
+  setChapterInSession,
+  getVerseRangeFromSession,
+  setVerseInSession,
+  getSavedVerseFromSession,
+  setSavedVerseInSession,
+  clearSessionCache,
+  getSessionCacheStats,
+} from "../cache/session-cache";
+import type { SavedVerse } from "../storage";
+
+// Re-export for dev tools
+export { clearSessionCache, getSessionCacheStats };
 
 export type BibleVersion = "ESV" | "NLT";
 
@@ -7,6 +21,36 @@ export interface BibleVerse {
   version: BibleVersion;
   text: string;
   cached: boolean;
+}
+
+export interface ChapterResponse {
+  reference: string;
+  version: BibleVersion;
+  verses: Record<string, string>; // { "1": "text...", "2": "text..." }
+  cached: boolean;
+}
+
+/**
+ * Parse a reference string into components
+ * "John 3:16" → { book: "John", chapter: 3, verse: 16 }
+ * "John 3:16-18" → { book: "John", chapter: 3, verse: 16, verseEnd: 18 }
+ */
+function parseReference(ref: string): {
+  book: string;
+  chapter: number;
+  verse?: number;
+  verseEnd?: number;
+} | null {
+  const match = ref.match(/^(.+?)\s+(\d+)(?::(\d+)(?:-(\d+))?)?$/);
+  if (!match) return null;
+
+  const [, book, chapter, verse, verseEnd] = match;
+  return {
+    book,
+    chapter: parseInt(chapter, 10),
+    verse: verse ? parseInt(verse, 10) : undefined,
+    verseEnd: verseEnd ? parseInt(verseEnd, 10) : undefined,
+  };
 }
 
 /**
@@ -20,6 +64,30 @@ export async function fetchVerse(
   reference: string,
   version: BibleVersion = "ESV"
 ): Promise<BibleVerse> {
+  // Check session cache first
+  const parsed = parseReference(reference);
+  if (parsed?.verse) {
+    const verseEnd = parsed.verseEnd || parsed.verse;
+    const cached = getVerseRangeFromSession(
+      parsed.book,
+      parsed.chapter,
+      parsed.verse,
+      verseEnd,
+      version
+    );
+    if (cached) {
+      console.log(`[BIBLE] Session cache hit: ${reference} (${version})`);
+      return {
+        reference,
+        version,
+        text: cached,
+        cached: true,
+      };
+    }
+  }
+
+  // Fetch from API
+  console.log(`[BIBLE] Fetching verse: ${reference} (${version})`);
   const token = await getAuthToken();
   const baseUrl = getSupabaseUrl();
 
@@ -48,7 +116,34 @@ export async function fetchVerse(
     throw new Error(error.error || "Failed to fetch verse");
   }
 
-  return response.json();
+  const result = await response.json();
+  console.log(`[BIBLE] Fetched verse: ${reference} (${version}) - DB cached: ${result.cached}`);
+
+  // Cache in session (if single verse, cache it; if range, cache each)
+  if (parsed?.verse) {
+    if (parsed.verseEnd) {
+      // Range - we'd need individual verses to cache properly
+      // For now, just cache the combined text as the start verse
+      setVerseInSession(
+        parsed.book,
+        parsed.chapter,
+        parsed.verse,
+        version,
+        result.text
+      );
+    } else {
+      // Single verse
+      setVerseInSession(
+        parsed.book,
+        parsed.chapter,
+        parsed.verse,
+        version,
+        result.text
+      );
+    }
+  }
+
+  return result;
 }
 
 /**
@@ -59,4 +154,136 @@ export async function fetchVerses(
   version: BibleVersion = "ESV"
 ): Promise<BibleVerse[]> {
   return Promise.all(references.map((ref) => fetchVerse(ref, version)));
+}
+
+/**
+ * Fetch an entire chapter from the Bible API
+ *
+ * @param book - Book name (e.g., "John", "Genesis")
+ * @param chapter - Chapter number
+ * @param version - Bible version ("ESV" or "NLT")
+ * @returns Object with verses mapped by verse number
+ */
+export async function fetchChapter(
+  book: string,
+  chapter: number,
+  version: BibleVersion = "ESV"
+): Promise<ChapterResponse> {
+  // Check session cache first
+  const cached = getChapterFromSession(book, chapter, version);
+  if (cached) {
+    console.log(`[BIBLE] Session cache hit: ${book} ${chapter} (${version})`);
+    return {
+      reference: `${book} ${chapter}`,
+      version,
+      verses: cached,
+      cached: true,
+    };
+  }
+
+  // Fetch from API
+  console.log(`[BIBLE] Fetching chapter: ${book} ${chapter} (${version})`);
+  const token = await getAuthToken();
+  const baseUrl = getSupabaseUrl();
+
+  const reference = `${book} ${chapter}`;
+  const params = new URLSearchParams({
+    ref: reference,
+    version,
+    chapter: "true", // Signal to API this is a chapter request
+  });
+
+  const response = await fetch(`${baseUrl}/functions/v1/bible?${params}`, {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+
+    if (response.status === 429) {
+      throw new Error(
+        `Daily limit reached. Resets at ${error.resetsAt || "midnight UTC"}`
+      );
+    }
+
+    throw new Error(error.error || "Failed to fetch chapter");
+  }
+
+  const result = await response.json();
+  console.log(`[BIBLE] Fetched chapter: ${book} ${chapter} (${version}) - DB cached: ${result.cached}, verses: ${Object.keys(result.verses || {}).length}`);
+
+  // Cache in session
+  if (result.verses) {
+    setChapterInSession(book, chapter, version, result.verses);
+  }
+
+  return result;
+}
+
+/**
+ * Get text for a saved verse
+ *
+ * Checks session cache first, then fetches from API (which checks verse_cache).
+ * If the verse was evicted from cache, re-fetches from API.
+ *
+ * @param verse - The saved verse (may or may not have text)
+ * @returns The verse text
+ */
+export async function getVerseText(verse: SavedVerse): Promise<string> {
+  const ref = `${verse.book} ${verse.chapter}:${verse.verseStart}${verse.verseEnd !== verse.verseStart ? `-${verse.verseEnd}` : ''}`;
+
+  // If text is already available, return it
+  if (verse.text) {
+    console.log(`[BIBLE] getVerseText: ${ref} - has text inline`);
+    return verse.text;
+  }
+
+  // Check session cache for this exact saved verse
+  const sessionCached = getSavedVerseFromSession(
+    verse.book,
+    verse.chapter,
+    verse.verseStart,
+    verse.verseEnd,
+    verse.version
+  );
+  if (sessionCached) {
+    console.log(`[BIBLE] getVerseText: ${ref} - session cache hit`);
+    return sessionCached;
+  }
+
+  // Build reference string
+  const reference =
+    verse.verseStart === verse.verseEnd
+      ? `${verse.book} ${verse.chapter}:${verse.verseStart}`
+      : `${verse.book} ${verse.chapter}:${verse.verseStart}-${verse.verseEnd}`;
+
+  console.log(`[BIBLE] getVerseText: ${ref} - fetching from API`);
+  // Fetch from API (which checks verse_cache internally, then external API)
+  const result = await fetchVerse(reference, verse.version);
+
+  // Cache in session for next time
+  setSavedVerseInSession(
+    verse.book,
+    verse.chapter,
+    verse.verseStart,
+    verse.verseEnd,
+    verse.version,
+    result.text
+  );
+
+  return result.text;
+}
+
+/**
+ * Format a verse reference string from SavedVerse
+ */
+export function formatReference(verse: SavedVerse): string {
+  if (verse.verseStart === verse.verseEnd) {
+    return `${verse.book} ${verse.chapter}:${verse.verseStart}`;
+  }
+  return `${verse.book} ${verse.chapter}:${verse.verseStart}-${verse.verseEnd}`;
 }

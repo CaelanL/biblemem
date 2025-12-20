@@ -8,6 +8,7 @@ import {
   type Difficulty as StorageDifficulty,
 } from '@/lib/storage';
 import { syncUpdateProgress } from '@/lib/sync';
+import { getVerseText } from '@/lib/api/bible';
 import {
   type Chunk,
   type Difficulty,
@@ -89,8 +90,14 @@ export function useStudySession({
       const verses = await getSavedVerses();
       const found = verses.find((v) => v.id === verseId);
       if (found) {
-        setVerse(found);
-        const parsedChunks = parseVerseIntoChunks(found, difficulty, chunkSize, Math.floor(Math.random() * 2));
+        // Ensure we have the verse text (may need to fetch from cache/API)
+        let verseWithText = found;
+        if (!found.text) {
+          const text = await getVerseText(found);
+          verseWithText = { ...found, text };
+        }
+        setVerse(verseWithText);
+        const parsedChunks = parseVerseIntoChunks(verseWithText, difficulty, chunkSize, Math.floor(Math.random() * 2));
         setChunks(parsedChunks);
       }
       setLoading(false);

@@ -5,11 +5,6 @@ export interface VerseRef {
   verseEnd?: number; // for ranges like John 3:16-17
 }
 
-export interface Verse {
-  reference: VerseRef;
-  text: string;
-}
-
 // Book name aliases (handle common variations)
 export const BOOK_ALIASES: Record<string, string> = {
   // Psalms

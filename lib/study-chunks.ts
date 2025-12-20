@@ -149,28 +149,29 @@ export function parseVerseIntoChunks(
   sessionSeed: number = 0
 ): Chunk[] {
   const totalVerses = verse.verseEnd - verse.verseStart + 1;
+  const text = verse.text || ''; // Guard against optional text
 
   // If only one verse, return single chunk
   if (totalVerses === 1) {
-    const annotatedText = annotateWithVerseNum(verse.text, verse.verseStart);
+    const annotatedText = annotateWithVerseNum(text, verse.verseStart);
     const chunkId = `${verse.id}:${verse.verseStart}`;
     return [{
       id: chunkId,
       verseNum: verse.verseStart,
-      text: verse.text,
+      text: text,
       displayText: applyDifficulty(annotatedText, difficulty, hashString(chunkId) + sessionSeed),
     }];
   }
 
   // If chunkSize >= totalVerses, return all verses as one chunk
   if (chunkSize >= totalVerses) {
-    const annotatedText = annotateVerseRange(verse.text, verse.verseStart, totalVerses);
+    const annotatedText = annotateVerseRange(text, verse.verseStart, totalVerses);
     const chunkId = `${verse.id}:${verse.verseStart}-${verse.verseEnd}`;
     return [{
       id: chunkId,
       verseNum: verse.verseStart,
       verseNumEnd: verse.verseEnd,
-      text: verse.text,
+      text: text,
       displayText: applyDifficulty(annotatedText, difficulty, hashString(chunkId) + sessionSeed),
     }];
   }
@@ -178,7 +179,7 @@ export function parseVerseIntoChunks(
   // Get individual verse texts
   const verseTexts: { verseNum: number; text: string }[] = [];
   for (let v = verse.verseStart; v <= verse.verseEnd; v++) {
-    const verseText = getVerseText(verse.text, v - verse.verseStart, totalVerses);
+    const verseText = getVerseText(text, v - verse.verseStart, totalVerses);
     verseTexts.push({ verseNum: v, text: verseText });
   }
 

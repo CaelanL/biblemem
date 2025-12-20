@@ -3,7 +3,8 @@ import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { getSavedVerses, formatVerseReference, type SavedVerse } from '@/lib/storage';
-import { toSuperscript, getVerseText } from '@/lib/study-chunks';
+import { toSuperscript, getVerseText as extractVerseText } from '@/lib/study-chunks';
+import { getVerseText as fetchVerseText } from '@/lib/api/bible';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState, useCallback } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
@@ -28,6 +29,8 @@ export default function StudySetupScreen() {
   const isDark = colorScheme === 'dark';
 
   const [verse, setVerse] = useState<SavedVerse | null>(null);
+  const [verseText, setVerseText] = useState<string>('');
+  const [textLoading, setTextLoading] = useState(false);
   const [difficulty, setDifficulty] = useState<Difficulty>('easy');
   const [chunkSize, setChunkSize] = useState(1);
   const [loading, setLoading] = useState(true);
@@ -65,6 +68,23 @@ export default function StudySetupScreen() {
     const found = verses.find((v) => v.id === id);
     setVerse(found ?? null);
     setLoading(false);
+
+    // Load verse text if not already available
+    if (found) {
+      if (found.text) {
+        setVerseText(found.text);
+      } else {
+        setTextLoading(true);
+        try {
+          const text = await fetchVerseText(found);
+          setVerseText(text);
+        } catch {
+          setVerseText('Failed to load verse text');
+        } finally {
+          setTextLoading(false);
+        }
+      }
+    }
   };
 
   const handleStartSession = () => {
@@ -79,18 +99,18 @@ export default function StudySetupScreen() {
 
   // Build annotated text with superscript verse numbers (same as VerseCard)
   const getAnnotatedText = () => {
-    if (!verse) return '';
+    if (!verse || !verseText) return '';
     const total = verse.verseEnd - verse.verseStart + 1;
 
     if (total === 1) {
-      return `${toSuperscript(verse.verseStart)}${verse.text}`;
+      return `${toSuperscript(verse.verseStart)}${verseText}`;
     }
 
     // Multi-verse: annotate each verse
     const parts: string[] = [];
     for (let i = 0; i < total; i++) {
-      const verseText = getVerseText(verse.text, i, total);
-      parts.push(`${toSuperscript(verse.verseStart + i)}${verseText}`);
+      const extracted = extractVerseText(verseText, i, total);
+      parts.push(`${toSuperscript(verse.verseStart + i)}${extracted}`);
     }
     return parts.join(' ');
   };
@@ -131,9 +151,13 @@ export default function StudySetupScreen() {
           >
             <IconSymbol name="arrow.up.left.and.arrow.down.right" size={14} color={accentColor} />
           </Pressable>
-          <Text style={[styles.previewText, { color: colors.text }]} numberOfLines={4}>
-            {verse.text}
-          </Text>
+          {textLoading ? (
+            <ActivityIndicator size="small" color={colors.icon} style={styles.textLoader} />
+          ) : (
+            <Text style={[styles.previewText, { color: colors.text }]} numberOfLines={4}>
+              {verseText}
+            </Text>
+          )}
         </View>
 
         {/* Expanded Modal */}
@@ -327,6 +351,10 @@ const styles = StyleSheet.create({
   previewText: {
     fontSize: 16,
     lineHeight: 24,
+  },
+  textLoader: {
+    alignSelf: 'flex-start',
+    marginTop: 4,
   },
   // Modal styles
   blurOverlay: {

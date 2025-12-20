@@ -6,5 +6,5 @@
  */
 
 export { supabase, ensureAuth, getAuthToken } from "./client";
-export { fetchVerse, fetchVerses, type BibleVersion, type BibleVerse } from "./bible";
+export { fetchVerse, fetchVerses, fetchChapter, type BibleVersion, type BibleVerse, type ChapterResponse } from "./bible";
 export { processRecording, type ProcessRecordingResult } from "./recording";
