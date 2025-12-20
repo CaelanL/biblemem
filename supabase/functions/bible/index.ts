@@ -1,5 +1,12 @@
+/**
+ * Bible API Edge Function
+ *
+ * Thin routing layer that delegates to adapters.
+ * Handles auth, caching, and version routing.
+ */
+
 import { serve } from "https://deno.land/std@0.208.0/http/server.ts";
-import { getAuthUser, getAdminClient } from "../_shared/auth.ts";
+import { getAuthUser } from "../_shared/auth.ts";
 import { handleCors } from "../_shared/cors.ts";
 import {
   unauthorized,
@@ -12,8 +19,57 @@ import {
   rateLimitResponse,
 } from "../_shared/usage.ts";
 
-const ESV_API_KEY = Deno.env.get("ESV_API_KEY");
-const NLT_API_KEY = Deno.env.get("NLT_API_KEY");
+// Adapters
+import { esvAdapter } from "./adapters/esv.ts";
+import { nltAdapter } from "./adapters/nlt.ts";
+import { BibleAdapter } from "./adapters/types.ts";
+
+// Shared modules
+import { normalizeReference } from "./normalize.ts";
+import {
+  getCachedVerse,
+  cacheVerse,
+  getCachedVerseRange,
+  getCachedChapter,
+  cacheChapter,
+} from "./cache.ts";
+import { getExpectedVerseCount } from "./verse-counts.ts";
+
+/**
+ * Version → Adapter registry
+ * Each version maps to its adapter
+ */
+const adapters: Record<string, BibleAdapter> = {
+  ESV: esvAdapter,
+  NLT: nltAdapter,
+  KJV: nltAdapter,
+  NTV: nltAdapter,
+  NLTUK: nltAdapter,
+};
+
+/**
+ * Parse a normalized reference into components
+ * "John 3" → { book: "John", chapter: 3 }
+ * "John 3:16" → { book: "John", chapter: 3, verse: 16 }
+ * "John 3:16-18" → { book: "John", chapter: 3, verse: 16, verseEnd: 18 }
+ */
+function parseReference(ref: string): {
+  book: string;
+  chapter: number;
+  verse?: number;
+  verseEnd?: number;
+} | null {
+  const match = ref.match(/^(.+?)\s+(\d+)(?::(\d+)(?:-(\d+))?)?$/);
+  if (!match) return null;
+
+  const [, book, chapter, verse, verseEnd] = match;
+  return {
+    book,
+    chapter: parseInt(chapter, 10),
+    verse: verse ? parseInt(verse, 10) : undefined,
+    verseEnd: verseEnd ? parseInt(verseEnd, 10) : undefined,
+  };
+}
 
 serve(async (req) => {
   // Handle CORS preflight
@@ -33,238 +89,190 @@ serve(async (req) => {
 
   // Parse query params
   const url = new URL(req.url);
-  const ref = url.searchParams.get("ref");
+  const rawRef = url.searchParams.get("ref");
   const version = url.searchParams.get("version") || "ESV";
+  const isChapterRequest = url.searchParams.get("chapter") === "true";
 
-  if (!ref) {
+  if (!rawRef) {
     return badRequest("Missing 'ref' parameter");
   }
 
-  if (version !== "ESV" && version !== "NLT") {
-    return badRequest("Unsupported version. Use ESV or NLT.");
+  // Get adapter for requested version
+  const adapter = adapters[version];
+  if (!adapter) {
+    return badRequest(
+      `Unsupported version: ${version}. Supported: ${Object.keys(adapters).join(", ")}`
+    );
   }
 
-  // Check usage
+  // Normalize reference ONCE, use everywhere
+  const ref = normalizeReference(rawRef);
+
+  // Parse into components
+  const parsed = parseReference(ref);
+  if (!parsed) {
+    return badRequest(`Invalid reference format: ${ref}`);
+  }
+
+  // Check usage limits
   const usage = await checkAndIncrementBibleUsage(user.id);
   if (!usage.allowed) {
     return rateLimitResponse(usage.used, usage.limit);
   }
 
   try {
-    // Check cache first
-    const cached = await getCachedVerse(ref, version);
+    if (isChapterRequest) {
+      // Get expected verse count for validation and cache check
+      const expectedCount = getExpectedVerseCount(ref) || 0;
+
+      // Check cache
+      const cached = await getCachedChapter(
+        parsed.book,
+        parsed.chapter,
+        version,
+        expectedCount
+      );
+      if (cached) {
+        console.log(`[BIBLE] DB cache hit: ${ref} (${version}) - ${Object.keys(cached).length} verses`);
+        return jsonResponse({
+          reference: ref,
+          version,
+          verses: cached,
+          cached: true,
+        });
+      }
+
+      // Fetch via adapter
+      console.log(`[BIBLE] Fetching chapter from API: ${ref} (${version})`);
+      const result = await adapter.fetchChapter(ref, version, expectedCount);
+
+      // Cache result (verse-level)
+      await cacheChapter(parsed.book, parsed.chapter, version, result.verses);
+      console.log(`[BIBLE] Cached chapter: ${ref} (${version}) - ${Object.keys(result.verses).length} verses`);
+
+      return jsonResponse({
+        reference: ref,
+        version,
+        verses: result.verses,
+        cached: false,
+      });
+    }
+
+    // Single verse or verse range request
+    if (parsed.verse) {
+      const verseEnd = parsed.verseEnd || parsed.verse;
+
+      // Check cache
+      let cachedText: string | null = null;
+      if (parsed.verseEnd) {
+        cachedText = await getCachedVerseRange(
+          parsed.book,
+          parsed.chapter,
+          parsed.verse,
+          verseEnd,
+          version
+        );
+      } else {
+        cachedText = await getCachedVerse(
+          parsed.book,
+          parsed.chapter,
+          parsed.verse,
+          version
+        );
+      }
+
+      if (cachedText) {
+        console.log(`[BIBLE] DB cache hit: ${ref} (${version})`);
+        return jsonResponse({
+          reference: ref,
+          version,
+          text: cachedText,
+          cached: true,
+        });
+      }
+
+      // For ranges, fetch the chapter and extract individual verses
+      // This allows us to cache each verse separately for proper range lookups
+      if (parsed.verseEnd) {
+        console.log(`[BIBLE] Fetching range from API: ${ref} (${version})`);
+        const expectedCount = getExpectedVerseCount(`${parsed.book} ${parsed.chapter}`) || 0;
+        const chapterResult = await adapter.fetchChapter(
+          `${parsed.book} ${parsed.chapter}`,
+          version,
+          expectedCount
+        );
+
+        // Extract just the verses we need
+        const rangeVerses: Record<string, string> = {};
+        for (let v = parsed.verse; v <= verseEnd; v++) {
+          const verseText = chapterResult.verses[v.toString()];
+          if (verseText) {
+            rangeVerses[v.toString()] = verseText;
+          }
+        }
+
+        // Cache each verse individually (cacheChapter handles this)
+        await cacheChapter(parsed.book, parsed.chapter, version, rangeVerses);
+        console.log(`[BIBLE] Cached range: ${ref} (${version}) - ${Object.keys(rangeVerses).length} verses`);
+
+        // Combine for response
+        const combinedText = Object.values(rangeVerses).join(" ");
+        return jsonResponse({
+          reference: ref,
+          version,
+          text: combinedText,
+          cached: false,
+        });
+      }
+
+      // Single verse - fetch and cache normally
+      console.log(`[BIBLE] Fetching single verse from API: ${ref} (${version})`);
+      const result = await adapter.fetchVerse(ref, version);
+      await cacheVerse(
+        parsed.book,
+        parsed.chapter,
+        parsed.verse,
+        version,
+        result.text
+      );
+      console.log(`[BIBLE] Cached single verse: ${ref} (${version})`);
+
+      return jsonResponse({
+        reference: ref,
+        version,
+        text: result.text,
+        cached: false,
+      });
+    }
+
+    // Chapter-only reference without ?chapter=true (treat as chapter request)
+    const expectedCount = getExpectedVerseCount(ref) || 0;
+    const cached = await getCachedChapter(
+      parsed.book,
+      parsed.chapter,
+      version,
+      expectedCount
+    );
     if (cached) {
       return jsonResponse({
         reference: ref,
         version,
-        text: cached,
+        verses: cached,
         cached: true,
       });
     }
 
-    // Fetch from API
-    let text: string;
-    if (version === "ESV") {
-      text = await fetchESV(ref);
-    } else {
-      text = await fetchNLT(ref);
-    }
-
-    // Cache for 24 hours
-    await cacheVerse(ref, version, text);
+    const result = await adapter.fetchChapter(ref, version, expectedCount);
+    await cacheChapter(parsed.book, parsed.chapter, version, result.verses);
 
     return jsonResponse({
       reference: ref,
       version,
-      text,
+      verses: result.verses,
       cached: false,
     });
   } catch (error) {
-    console.error("Bible fetch error:", error);
+    console.error(`Bible fetch error (${version}):`, error);
     return serverError("Failed to fetch verse");
   }
 });
-
-/**
- * Check cache for verse
- */
-async function getCachedVerse(
-  reference: string,
-  version: string
-): Promise<string | null> {
-  const admin = getAdminClient();
-
-  const { data } = await admin
-    .from("verse_cache")
-    .select("text")
-    .eq("reference", reference)
-    .eq("version", version)
-    .gt("expires_at", new Date().toISOString())
-    .single();
-
-  return data?.text ?? null;
-}
-
-/**
- * Cache verse for 24 hours
- */
-async function cacheVerse(
-  reference: string,
-  version: string,
-  text: string
-): Promise<void> {
-  const admin = getAdminClient();
-
-  const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
-
-  await admin.from("verse_cache").upsert(
-    {
-      reference,
-      version,
-      text,
-      fetched_at: new Date().toISOString(),
-      expires_at: expiresAt,
-    },
-    { onConflict: "reference,version" }
-  );
-}
-
-/**
- * Fetch from ESV API
- */
-async function fetchESV(ref: string): Promise<string> {
-  if (!ESV_API_KEY) {
-    throw new Error("ESV_API_KEY not configured");
-  }
-
-  const params = new URLSearchParams({
-    q: ref,
-    "include-passage-references": "false",
-    "include-verse-numbers": "false",
-    "include-first-verse-numbers": "false",
-    "include-footnotes": "false",
-    "include-footnote-body": "false",
-    "include-headings": "false",
-    "include-short-copyright": "false",
-    "include-selahs": "true",
-    "indent-paragraphs": "0",
-    "indent-poetry": "false",
-  });
-
-  const response = await fetch(
-    `https://api.esv.org/v3/passage/text/?${params}`,
-    {
-      headers: { Authorization: `Token ${ESV_API_KEY}` },
-    }
-  );
-
-  if (!response.ok) {
-    const error = await response.text();
-    console.error("ESV API error:", error);
-    throw new Error(`ESV API error: ${response.status}`);
-  }
-
-  const data = await response.json();
-  const text = data.passages?.[0]?.trim() || "";
-
-  if (!text) {
-    throw new Error("Verse not found");
-  }
-
-  return text;
-}
-
-/**
- * Fetch from NLT API
- */
-async function fetchNLT(ref: string): Promise<string> {
-  if (!NLT_API_KEY) {
-    throw new Error("NLT_API_KEY not configured");
-  }
-
-  // NLT uses dot notation: "John 3:16" → "John.3.16"
-  // Handle ranges: "John 3:16-18" → "John.3.16-18"
-  const nltRef = ref
-    .replace(/\s+/g, ".")
-    .replace(":", ".")
-    .replace(/-(\d+)$/, "-$1"); // Keep range intact
-
-  const response = await fetch(
-    `https://api.nlt.to/api/passages?ref=${encodeURIComponent(nltRef)}&key=${NLT_API_KEY}`
-  );
-
-  if (!response.ok) {
-    const error = await response.text();
-    console.error("NLT API error:", error);
-    throw new Error(`NLT API error: ${response.status}`);
-  }
-
-  const html = await response.text();
-  return parseNLTResponse(html);
-}
-
-/**
- * Parse NLT HTML response to extract verse text
- * NLT returns full HTML documents with verse text in specific structures
- */
-function parseNLTResponse(html: string): string {
-  // First, try to extract content from <p> tags within the body
-  // NLT wraps verse text in paragraph tags
-
-  // Remove everything outside the body
-  let content = html;
-  const bodyMatch = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
-  if (bodyMatch) {
-    content = bodyMatch[1];
-  }
-
-  // Remove script tags
-  content = content.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "");
-
-  // Remove style tags
-  content = content.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "");
-
-  // Remove header/nav/footer sections that might contain branding
-  content = content.replace(/<header[^>]*>[\s\S]*?<\/header>/gi, "");
-  content = content.replace(/<nav[^>]*>[\s\S]*?<\/nav>/gi, "");
-  content = content.replace(/<footer[^>]*>[\s\S]*?<\/footer>/gi, "");
-
-  // Remove verse number spans (class="vn") - we don't want verse numbers in text
-  content = content.replace(/<span[^>]*class="vn"[^>]*>[\s\S]*?<\/span>/gi, "");
-
-  // Remove section headings (h1, h2, h3, etc.)
-  content = content.replace(/<h[1-6][^>]*>[\s\S]*?<\/h[1-6]>/gi, "");
-
-  // Now strip remaining HTML tags
-  content = content
-    .replace(/<[^>]*>/g, "") // Remove HTML tags
-    .replace(/&nbsp;/g, " ") // Replace nbsp
-    .replace(/&amp;/g, "&") // Replace ampersand
-    .replace(/&lt;/g, "<") // Replace less than
-    .replace(/&gt;/g, ">") // Replace greater than
-    .replace(/&quot;/g, '"') // Replace quotes
-    .replace(/&#39;/g, "'") // Replace apostrophe
-    .replace(/&rsquo;/g, "'") // Right single quote
-    .replace(/&lsquo;/g, "'") // Left single quote
-    .replace(/&rdquo;/g, '"') // Right double quote
-    .replace(/&ldquo;/g, '"') // Left double quote
-    .replace(/&mdash;/g, "—") // Em dash
-    .replace(/&ndash;/g, "–") // En dash
-    .replace(/&#\d+;/g, "") // Remove any remaining numeric entities
-    .replace(/\s+/g, " ") // Collapse whitespace
-    .trim();
-
-  // Remove common NLT branding/footer text
-  content = content
-    .replace(/Holy Bible,?\s*New Living Translation.*/i, "")
-    .replace(/NLT\.to.*/i, "")
-    .replace(/Tyndale House.*/i, "")
-    .replace(/Copyright.*/i, "")
-    .trim();
-
-  if (!content) {
-    throw new Error("Could not parse NLT response");
-  }
-
-  return content;
-}

@@ -2,14 +2,13 @@ import { AppHeader } from '@/components/app-header';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
-import { normalizeBookName } from '@/lib/bible';
+import { normalizeBookName, getVerseCount } from '@/lib/bible';
 import { type BibleVersion } from '@/lib/storage';
 import { syncSaveVerse } from '@/lib/sync';
 import { useSettings } from '@/lib/settings';
-import { fetchVerse } from '@/lib/api';
-import bibleData from '@/assets/bible/esv.json';
+import { fetchVerse, fetchChapter } from '@/lib/api';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useRef, useState, useCallback } from 'react';
+import { useRef, useState, useCallback, useEffect } from 'react';
 import {
   ScrollView,
   StyleSheet,
@@ -23,9 +22,7 @@ import {
   type GestureResponderEvent,
 } from 'react-native';
 import * as Haptics from 'expo-haptics';
-
-type BibleData = Record<string, Record<string, Record<string, string>>>;
-const bible = bibleData as BibleData;
+import NetInfo from '@react-native-community/netinfo';
 
 interface VerseLayout {
   verseNum: number;
@@ -47,15 +44,74 @@ export default function VerseSelectScreen() {
 
   const bookName = normalizeBookName(decodeURIComponent(book ?? ''));
   const chapterNum = parseInt(chapter ?? '1', 10);
-  const chapterData = bible[bookName]?.[String(chapterNum)] ?? {};
-  const verses = Object.entries(chapterData).sort(
-    ([a], [b]) => parseInt(a, 10) - parseInt(b, 10)
-  );
+  const verseCount = getVerseCount(bookName, chapterNum);
 
   // Translation from URL param (passed from book selection), fallback to settings
   const initialVersion = (version === 'ESV' || version === 'NLT') ? version : settings.bibleVersion;
   const [selectedVersion, setSelectedVersion] = useState<BibleVersion>(initialVersion);
   const [versionPickerVisible, setVersionPickerVisible] = useState(false);
+
+  // Chapter data from API
+  const [verses, setVerses] = useState<[string, string][]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [isOffline, setIsOffline] = useState(false);
+  const [retryCount, setRetryCount] = useState(0);
+
+  // Load chapter from API
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadChapter() {
+      setLoading(true);
+      setError(null);
+      setIsOffline(false);
+
+      // Check network status
+      const netState = await NetInfo.fetch();
+      if (!netState.isConnected) {
+        setIsOffline(true);
+        setLoading(false);
+        return;
+      }
+
+      try {
+        const response = await fetchChapter(bookName, chapterNum, selectedVersion);
+        if (cancelled) return;
+
+        // Validate response has verses
+        if (!response.verses || typeof response.verses !== 'object') {
+          throw new Error('Invalid response from server');
+        }
+
+        // Convert verses object to sorted array
+        const versesArray = Object.entries(response.verses)
+          .sort(([a], [b]) => parseInt(a, 10) - parseInt(b, 10)) as [string, string][];
+        setVerses(versesArray);
+        setError(null);
+      } catch (err) {
+        if (cancelled) return;
+        console.error('Failed to load chapter:', err);
+        setError(err instanceof Error ? err.message : 'Failed to load chapter');
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    }
+
+    loadChapter();
+    return () => { cancelled = true; };
+  }, [bookName, chapterNum, selectedVersion, retryCount]);
+
+  const handleRetry = useCallback(() => {
+    // Clear states immediately for visual feedback
+    setError(null);
+    setIsOffline(false);
+    setLoading(true);
+    // Trigger re-fetch
+    setRetryCount(c => c + 1);
+  }, []);
 
   // Selection state
   const [selectionStart, setSelectionStart] = useState<number | null>(null);
@@ -347,61 +403,104 @@ export default function VerseSelectScreen() {
         </Pressable>
       </Modal>
 
-      <View
-        style={styles.touchContainer}
-        onStartShouldSetResponder={() => false}
-        onMoveShouldSetResponder={() => false}
-        onStartShouldSetResponderCapture={() => isSelecting}
-        onMoveShouldSetResponderCapture={() => isSelecting}
-        onResponderMove={handleResponderMove}
-        onResponderRelease={() => {
-          clearAutoScroll();
-          setIsSelecting(false);
-        }}
-        onResponderTerminate={() => {
-          clearAutoScroll();
-          setIsSelecting(false);
-        }}
-      >
-        <ScrollView
-          ref={scrollViewRef}
-          style={styles.scrollView}
-          onScroll={handleScroll}
-          onLayout={handleScrollViewLayout}
-          scrollEventThrottle={16}
-          scrollEnabled={!isSelecting}
-          onTouchStart={handleScrollViewTouchStart}
-          onTouchMove={handleScrollViewTouchMove}
-          onTouchEnd={handleScrollViewTouchEnd}
-        >
-          <View style={styles.versesContainer}>
-            {verses.map(([verseNum, text]) => {
-              const num = parseInt(verseNum, 10);
-              const selected = isVerseSelected(num);
+      {/* Loading State */}
+      {loading && (
+        <View style={styles.centerContainer}>
+          <ActivityIndicator size="large" color={buttonBg} />
+          <Text style={[styles.statusText, { color: colors.icon }]}>Loading chapter...</Text>
+        </View>
+      )}
 
-              return (
-                <View
-                  key={verseNum}
-                  onLayout={(e) => handleVerseLayout(num, e.nativeEvent.layout)}
-                  style={[
-                    styles.verseWrapper,
-                    selected && { backgroundColor: highlightBg },
-                  ]}
-                >
-                  <Text style={[styles.verseText, { color: colors.text }]}>
-                    <Text style={[styles.verseNumber, { color: isDark ? '#60a5fa' : colors.tint }]}>
-                      {verseNum}
+      {/* Offline State */}
+      {!loading && isOffline && (
+        <View style={styles.centerContainer}>
+          <IconSymbol name="wifi.slash" size={48} color={colors.icon} />
+          <Text style={[styles.statusTitle, { color: colors.text }]}>No Internet Connection</Text>
+          <Text style={[styles.statusText, { color: colors.icon }]}>
+            Connect to the internet to browse verses
+          </Text>
+          <Pressable
+            style={[styles.retryButton, { backgroundColor: buttonBg }]}
+            onPress={handleRetry}
+          >
+            <Text style={styles.retryButtonText}>Try Again</Text>
+          </Pressable>
+        </View>
+      )}
+
+      {/* Error State */}
+      {!loading && !isOffline && error && (
+        <View style={styles.centerContainer}>
+          <IconSymbol name="exclamationmark.triangle.fill" size={48} color="#ef4444" />
+          <Text style={[styles.statusTitle, { color: colors.text }]}>Failed to Load</Text>
+          <Text style={[styles.statusText, { color: colors.icon }]}>{error}</Text>
+          <Pressable
+            style={[styles.retryButton, { backgroundColor: buttonBg }]}
+            onPress={handleRetry}
+          >
+            <Text style={styles.retryButtonText}>Try Again</Text>
+          </Pressable>
+        </View>
+      )}
+
+      {/* Verses Content */}
+      {!loading && !isOffline && !error && (
+        <View
+          style={styles.touchContainer}
+          onStartShouldSetResponder={() => false}
+          onMoveShouldSetResponder={() => false}
+          onStartShouldSetResponderCapture={() => isSelecting}
+          onMoveShouldSetResponderCapture={() => isSelecting}
+          onResponderMove={handleResponderMove}
+          onResponderRelease={() => {
+            clearAutoScroll();
+            setIsSelecting(false);
+          }}
+          onResponderTerminate={() => {
+            clearAutoScroll();
+            setIsSelecting(false);
+          }}
+        >
+          <ScrollView
+            ref={scrollViewRef}
+            style={styles.scrollView}
+            onScroll={handleScroll}
+            onLayout={handleScrollViewLayout}
+            scrollEventThrottle={16}
+            scrollEnabled={!isSelecting}
+            onTouchStart={handleScrollViewTouchStart}
+            onTouchMove={handleScrollViewTouchMove}
+            onTouchEnd={handleScrollViewTouchEnd}
+          >
+            <View style={styles.versesContainer}>
+              {verses.map(([verseNum, text]) => {
+                const num = parseInt(verseNum, 10);
+                const selected = isVerseSelected(num);
+
+                return (
+                  <View
+                    key={verseNum}
+                    onLayout={(e) => handleVerseLayout(num, e.nativeEvent.layout)}
+                    style={[
+                      styles.verseWrapper,
+                      selected && { backgroundColor: highlightBg },
+                    ]}
+                  >
+                    <Text style={[styles.verseText, { color: colors.text }]}>
+                      <Text style={[styles.verseNumber, { color: isDark ? '#60a5fa' : colors.tint }]}>
+                        {verseNum}
+                      </Text>
+                      {'  '}
+                      {text}
                     </Text>
-                    {'  '}
-                    {text}
-                  </Text>
-                </View>
-              );
-            })}
-          </View>
-          <View style={styles.bottomPadding} />
-        </ScrollView>
-      </View>
+                  </View>
+                );
+              })}
+            </View>
+            <View style={styles.bottomPadding} />
+          </ScrollView>
+        </View>
+      )}
 
       {hasSelection && (
         <View
@@ -430,6 +529,34 @@ export default function VerseSelectScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+  },
+  centerContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+    gap: 12,
+  },
+  statusTitle: {
+    fontSize: 20,
+    fontWeight: '600',
+    marginTop: 8,
+  },
+  statusText: {
+    fontSize: 15,
+    textAlign: 'center',
+    marginTop: 4,
+  },
+  retryButton: {
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 10,
+    marginTop: 16,
+  },
+  retryButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
   },
   modalOverlay: {
     flex: 1,

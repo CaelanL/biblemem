@@ -1,11 +1,24 @@
-import { BOOK_ALIASES, Verse, VerseRef } from './types';
-import bibleData from '@/assets/bible/esv.json';
+import { BOOK_ALIASES, VerseRef } from './types';
+import structureData from '@/assets/bible/structure.json';
 
-type BibleData = Record<string, Record<string, Record<string, string>>>;
-const bible = bibleData as BibleData;
+interface BookStructure {
+  abbr: string;
+  book: string;
+  chapters: number[]; // Array of verse counts per chapter
+}
+
+const structure = structureData as BookStructure[];
+
+// Build lookup maps for fast access
+const bookByName: Record<string, BookStructure> = {};
+const bookByAbbr: Record<string, BookStructure> = {};
+for (const book of structure) {
+  bookByName[book.book.toLowerCase()] = book;
+  bookByAbbr[book.abbr.toLowerCase()] = book;
+}
 
 /**
- * Normalize book name to match JSON keys
+ * Normalize book name to canonical form
  */
 export function normalizeBookName(book: string): string {
   const lower = book.toLowerCase().trim();
@@ -15,17 +28,20 @@ export function normalizeBookName(book: string): string {
     return BOOK_ALIASES[lower];
   }
 
-  // Try to find exact match (case-insensitive)
-  const books = Object.keys(bible);
-  const match = books.find((b) => b.toLowerCase() === lower);
-  if (match) {
-    return match;
+  // Try exact match by book name
+  if (bookByName[lower]) {
+    return bookByName[lower].book;
   }
 
-  // Try partial match (for things like "John" matching "John")
-  const partialMatch = books.find((b) => b.toLowerCase().startsWith(lower));
+  // Try by abbreviation
+  if (bookByAbbr[lower]) {
+    return bookByAbbr[lower].book;
+  }
+
+  // Try partial match
+  const partialMatch = structure.find((b) => b.book.toLowerCase().startsWith(lower));
   if (partialMatch) {
-    return partialMatch;
+    return partialMatch.book;
   }
 
   // Return original with title case as fallback
@@ -33,51 +49,11 @@ export function normalizeBookName(book: string): string {
 }
 
 /**
- * Get a single verse
+ * Get book structure by name
  */
-export function getVerse(ref: VerseRef): Verse | null {
-  const bookName = normalizeBookName(ref.book);
-  const chapter = String(ref.chapter);
-  const verse = String(ref.verse);
-
-  const text = bible[bookName]?.[chapter]?.[verse];
-
-  if (!text) {
-    return null;
-  }
-
-  return {
-    reference: { ...ref, book: bookName },
-    text,
-  };
-}
-
-/**
- * Get a range of verses (e.g., John 3:16-18)
- */
-export function getVerseRange(ref: VerseRef): Verse | null {
-  const bookName = normalizeBookName(ref.book);
-  const chapter = String(ref.chapter);
-  const startVerse = ref.verse;
-  const endVerse = ref.verseEnd ?? ref.verse;
-
-  const texts: string[] = [];
-
-  for (let v = startVerse; v <= endVerse; v++) {
-    const text = bible[bookName]?.[chapter]?.[String(v)];
-    if (text) {
-      texts.push(text);
-    }
-  }
-
-  if (texts.length === 0) {
-    return null;
-  }
-
-  return {
-    reference: { ...ref, book: bookName },
-    text: texts.join(' '),
-  };
+function getBookStructure(book: string): BookStructure | null {
+  const bookName = normalizeBookName(book);
+  return bookByName[bookName.toLowerCase()] ?? null;
 }
 
 /**
@@ -104,18 +80,6 @@ export function parseReference(refString: string): VerseRef | null {
 }
 
 /**
- * Get verse(s) from a reference string
- */
-export function getVerseFromString(refString: string): Verse | null {
-  const ref = parseReference(refString);
-  if (!ref) {
-    return null;
-  }
-
-  return ref.verseEnd ? getVerseRange(ref) : getVerse(ref);
-}
-
-/**
  * Format a reference for display
  */
 export function formatReference(ref: VerseRef): string {
@@ -127,25 +91,26 @@ export function formatReference(ref: VerseRef): string {
  * Get all book names
  */
 export function getBooks(): string[] {
-  return Object.keys(bible);
+  return structure.map((b) => b.book);
 }
 
 /**
  * Get chapter count for a book
  */
 export function getChapterCount(book: string): number {
-  const bookName = normalizeBookName(book);
-  const chapters = bible[bookName];
-  return chapters ? Object.keys(chapters).length : 0;
+  const bookStruct = getBookStructure(book);
+  return bookStruct?.chapters.length ?? 0;
 }
 
 /**
  * Get verse count for a chapter
  */
 export function getVerseCount(book: string, chapter: number): number {
-  const bookName = normalizeBookName(book);
-  const verses = bible[bookName]?.[String(chapter)];
-  return verses ? Object.keys(verses).length : 0;
+  const bookStruct = getBookStructure(book);
+  if (!bookStruct || chapter < 1 || chapter > bookStruct.chapters.length) {
+    return 0;
+  }
+  return bookStruct.chapters[chapter - 1]; // chapters array is 0-indexed
 }
 
 export * from './types';

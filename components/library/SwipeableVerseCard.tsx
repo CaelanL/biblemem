@@ -1,9 +1,11 @@
+import { useEffect, useState } from 'react';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { formatVerseReference, type SavedVerse, type Difficulty } from '@/lib/storage';
+import { getVerseText } from '@/lib/api/bible';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated, {
   FadeInDown,
   useSharedValue,
@@ -36,6 +38,20 @@ export function SwipeableVerseCard({
   const cardBg = isDark ? '#1c1c1e' : '#ffffff';
   const borderColor = isDark ? 'rgba(96,165,250,0.3)' : 'rgba(10,126,164,0.25)';
   const primaryColor = isDark ? '#60a5fa' : '#0a7ea4';
+
+  // Text loading state (for verses without cached text)
+  const [text, setText] = useState<string>(verse.text || '');
+  const [loading, setLoading] = useState(!verse.text);
+
+  useEffect(() => {
+    if (!verse.text) {
+      setLoading(true);
+      getVerseText(verse)
+        .then(setText)
+        .catch(() => setText('Failed to load verse text'))
+        .finally(() => setLoading(false));
+    }
+  }, [verse]);
 
   // Get highest completed difficulty (90%+)
   const getHighestDifficulty = (): Difficulty | null => {
@@ -143,9 +159,13 @@ export function SwipeableVerseCard({
                     <IconSymbol name="checkmark" size={12} color="#22c55e" />
                   )}
                 </View>
-                <Text style={[styles.versePreview, { color: colors.text }]} numberOfLines={2}>
-                  {verse.text}
-                </Text>
+                {loading ? (
+                  <ActivityIndicator size="small" color={colors.icon} style={styles.loader} />
+                ) : (
+                  <Text style={[styles.versePreview, { color: colors.text }]} numberOfLines={2}>
+                    {text}
+                  </Text>
+                )}
               </View>
             </View>
           </Pressable>
@@ -230,5 +250,9 @@ const styles = StyleSheet.create({
   versePreview: {
     fontSize: 15,
     lineHeight: 21,
+  },
+  loader: {
+    alignSelf: 'flex-start',
+    marginTop: 4,
   },
 });
