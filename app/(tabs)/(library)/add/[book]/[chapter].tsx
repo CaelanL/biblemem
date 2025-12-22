@@ -4,7 +4,7 @@ import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { normalizeBookName, getVerseCount } from '@/lib/bible';
 import { type BibleVersion } from '@/lib/storage';
-import { syncSaveVerse } from '@/lib/sync';
+import { useAppStore } from '@/lib/store';
 import { useSettings } from '@/lib/settings';
 import { fetchVerse, fetchChapter } from '@/lib/api';
 import { router, useLocalSearchParams } from 'expo-router';
@@ -302,19 +302,12 @@ export default function VerseSelectScreen() {
     setIsSaving(true);
 
     try {
-      const reference = min === max
-        ? `${bookName} ${chapterNum}:${min}`
-        : `${bookName} ${chapterNum}:${min}-${max}`;
-
-      const { text } = await fetchVerse(reference, selectedVersion);
-
-      await syncSaveVerse({
+      await useAppStore.getState().addVerse({
         book: bookName,
         chapter: chapterNum,
         verseStart: min,
         verseEnd: max,
-        text,
-      }, collectionId, selectedVersion);
+      }, collectionId || 'my-verses', selectedVersion);
 
       // Navigate back to collection or library
       if (collectionId) {

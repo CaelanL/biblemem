@@ -10,6 +10,7 @@ import { useColorScheme } from '@/hooks/use-color-scheme';
 import { migrateLocalDataToServer } from '@/lib/sync';
 import { AuthProvider, useAuth } from '@/lib/auth';
 import { clearSessionCache, getSessionCacheStats } from '@/lib/api/bible';
+import { useAppStore } from '@/lib/store';
 
 // Expose dev tools to console
 if (__DEV__) {
@@ -42,12 +43,21 @@ function RootLayoutNav() {
     }
   }, [isAuthenticated, isLoading, segments, navigationState?.key]);
 
-  // Run migration when authenticated
+  // Hydrate store and run migration when authenticated
   useEffect(() => {
     if (isAuthenticated) {
+      // Hydrate the store with user data
+      useAppStore.getState().hydrate().catch((e) => {
+        console.error('[App] Store hydration error:', e);
+      });
+
+      // Run migration
       migrateLocalDataToServer().catch((e) => {
         console.error('[App] Migration error:', e);
       });
+    } else {
+      // Clear store on logout
+      useAppStore.getState().clear();
     }
   }, [isAuthenticated]);
 
