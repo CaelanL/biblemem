@@ -7,7 +7,7 @@ import {
   type SavedVerse,
   type Difficulty as StorageDifficulty,
 } from '@/lib/storage';
-import { syncUpdateProgress } from '@/lib/sync';
+import { useAppStore } from '@/lib/store';
 import { getVerseText } from '@/lib/api/bible';
 import {
   type Chunk,
@@ -157,12 +157,12 @@ export function useStudySession({
       allAlignments.set(currentIndex, alignment);
       const finalScoreValue = calculateFinalScore(allAlignments);
 
-      // Update progress in storage and sync to server
+      // Update progress in Zustand store (writes to Supabase + updates local state)
       if (verseId && difficulty) {
         try {
-          await syncUpdateProgress(verseId, difficulty as StorageDifficulty, finalScoreValue);
+          await useAppStore.getState().updateVerseProgress(verseId, difficulty as StorageDifficulty, finalScoreValue);
         } catch (e) {
-          console.error('[STUDY] Failed to sync progress:', e);
+          console.error('[STUDY] Failed to update progress:', e);
         }
       }
 

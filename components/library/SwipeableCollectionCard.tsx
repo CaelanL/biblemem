@@ -1,6 +1,7 @@
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { useDebouncedPress } from '@/hooks/use-debounced-press';
 import { type Collection } from '@/lib/storage';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
@@ -42,6 +43,7 @@ export function SwipeableCollectionCard({
   const primaryColor = isDark ? '#60a5fa' : '#0a7ea4';
 
   const translateX = useSharedValue(0);
+  const debouncedPress = useDebouncedPress(onPress);
 
   // Don't allow swipe on default collection
   const canDelete = !collection.isDefault;
@@ -84,7 +86,7 @@ export function SwipeableCollectionCard({
     if (translateX.value < -10) {
       translateX.value = withSpring(0, { damping: 20 });
     } else {
-      onPress();
+      debouncedPress();
     }
   };
 
