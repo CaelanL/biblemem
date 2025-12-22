@@ -2,12 +2,12 @@ import { AppHeader } from '@/components/app-header';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
-import { getSavedVerses, formatVerseReference, type SavedVerse } from '@/lib/storage';
+import { formatVerseReference, type SavedVerse } from '@/lib/storage';
 import { toSuperscript, getVerseText as extractVerseText } from '@/lib/study-chunks';
 import { getVerseText as fetchVerseText } from '@/lib/api/bible';
+import { useVerse } from '@/lib/store';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useEffect, useState, useCallback } from 'react';
-import { useFocusEffect } from '@react-navigation/native';
+import { useEffect, useState } from 'react';
 import {
   Pressable,
   StyleSheet,
@@ -28,12 +28,13 @@ export default function StudySetupScreen() {
   const colors = Colors[colorScheme ?? 'light'];
   const isDark = colorScheme === 'dark';
 
-  const [verse, setVerse] = useState<SavedVerse | null>(null);
+  // Get verse from store (instant, no loading)
+  const verse = useVerse(id || '');
+
   const [verseText, setVerseText] = useState<string>('');
   const [textLoading, setTextLoading] = useState(false);
   const [difficulty, setDifficulty] = useState<Difficulty>('easy');
   const [chunkSize, setChunkSize] = useState(1);
-  const [loading, setLoading] = useState(true);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [dropdownItems, setDropdownItems] = useState<{label: string; value: number}[]>([]);
   const [expanded, setExpanded] = useState(false);
@@ -42,13 +43,6 @@ export default function StudySetupScreen() {
   const totalVerses = verse ? verse.verseEnd - verse.verseStart + 1 : 1;
   // Available chunk sizes (1, 2, 3... up to total verses, max 5)
   const maxChunkSize = Math.min(totalVerses, 5);
-
-  // Reload verse data when screen comes into focus (to get updated progress)
-  useFocusEffect(
-    useCallback(() => {
-      loadVerse();
-    }, [id])
-  );
 
   // Update dropdown items when verse loads
   useEffect(() => {
@@ -63,29 +57,20 @@ export default function StudySetupScreen() {
     }
   }, [verse]);
 
-  const loadVerse = async () => {
-    const verses = await getSavedVerses();
-    const found = verses.find((v) => v.id === id);
-    setVerse(found ?? null);
-    setLoading(false);
-
-    // Load verse text if not already available
-    if (found) {
-      if (found.text) {
-        setVerseText(found.text);
+  // Load verse text
+  useEffect(() => {
+    if (verse) {
+      if (verse.text) {
+        setVerseText(verse.text);
       } else {
         setTextLoading(true);
-        try {
-          const text = await fetchVerseText(found);
-          setVerseText(text);
-        } catch {
-          setVerseText('Failed to load verse text');
-        } finally {
-          setTextLoading(false);
-        }
+        fetchVerseText(verse)
+          .then(setVerseText)
+          .catch(() => setVerseText('Failed to load verse text'))
+          .finally(() => setTextLoading(false));
       }
     }
-  };
+  }, [verse]);
 
   const handleStartSession = () => {
     if (!verse) return;
@@ -114,14 +99,6 @@ export default function StudySetupScreen() {
     }
     return parts.join(' ');
   };
-
-  if (loading) {
-    return (
-      <View style={[styles.container, styles.centered, { backgroundColor: colors.background }]}>
-        <ActivityIndicator size="large" color={colors.tint} />
-      </View>
-    );
-  }
 
   if (!verse) {
     return (

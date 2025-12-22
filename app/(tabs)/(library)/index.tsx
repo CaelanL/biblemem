@@ -1,16 +1,13 @@
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { AddCollectionModal } from '@/components/library/AddCollectionModal';
 import { SwipeableCollectionCard } from '@/components/library/SwipeableCollectionCard';
+import { CollectionCardSkeleton } from '@/components/library/CollectionCardSkeleton';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
-import {
-  getCollections,
-  getCollectionVerseCount,
-  type Collection,
-} from '@/lib/storage';
-import { syncCreateCollection, syncDeleteCollection } from '@/lib/sync';
+import { type Collection } from '@/lib/storage';
+import { useAppStore, useCollections, useHydrated, useCollectionVerseCount } from '@/lib/store';
 import { router } from 'expo-router';
-import { useCallback, useState } from 'react';
+import { useState } from 'react';
 import {
   Pressable,
   ScrollView,
@@ -19,53 +16,64 @@ import {
   View,
   RefreshControl,
 } from 'react-native';
-import { useFocusEffect } from '@react-navigation/native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 
 interface CollectionWithCount extends Collection {
   verseCount: number;
 }
 
+// Component to get verse count for a collection
+function CollectionCard({
+  collection,
+  index,
+  onPress,
+  onDelete,
+}: {
+  collection: Collection;
+  index: number;
+  onPress: () => void;
+  onDelete: () => void;
+}) {
+  const verseCount = useCollectionVerseCount(collection.id);
+  const collectionWithCount: CollectionWithCount = { ...collection, verseCount };
+
+  return (
+    <SwipeableCollectionCard
+      collection={collectionWithCount}
+      index={index}
+      onPress={onPress}
+      onDelete={onDelete}
+    />
+  );
+}
+
 export default function LibraryScreen() {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
   const isDark = colorScheme === 'dark';
-  const [collections, setCollections] = useState<CollectionWithCount[]>([]);
+
+  // Store data
+  const collections = useCollections();
+  const hydrated = useHydrated();
+  const addCollection = useAppStore((s) => s.addCollection);
+  const deleteCollection = useAppStore((s) => s.deleteCollection);
+  const refresh = useAppStore((s) => s.refresh);
+
   const [refreshing, setRefreshing] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
 
-  const loadCollections = useCallback(async () => {
-    const colls = await getCollections();
-    // Get verse counts for each collection
-    const collsWithCounts = await Promise.all(
-      colls.map(async (c) => ({
-        ...c,
-        verseCount: await getCollectionVerseCount(c.id),
-      }))
-    );
-    setCollections(collsWithCounts);
-  }, []);
-
-  useFocusEffect(
-    useCallback(() => {
-      loadCollections();
-    }, [loadCollections])
-  );
-
   const onRefresh = async () => {
     setRefreshing(true);
-    await loadCollections();
+    await refresh();
     setRefreshing(false);
   };
 
   const handleAddCollection = async (name: string) => {
-    await syncCreateCollection(name);
-    await loadCollections();
+    await addCollection(name);
   };
 
   const handleDeleteCollection = async (id: string) => {
-    await syncDeleteCollection(id);
-    await loadCollections();
+    await deleteCollection(id);
   };
 
   const handleCollectionPress = (collection: Collection) => {
@@ -105,16 +113,22 @@ export default function LibraryScreen() {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.tint} />
         }
       >
-        {collections.map((collection, index) => (
-          <SwipeableCollectionCard
-            key={collection.id}
-            collection={collection}
-            index={index}
-            onPress={() => handleCollectionPress(collection)}
-            onDelete={() => handleDeleteCollection(collection.id)}
-          />
-        ))}
-        {collections.length <= 1 && renderEmptyHint()}
+        {!hydrated ? (
+          <CollectionCardSkeleton count={3} />
+        ) : (
+          <>
+            {collections.map((collection, index) => (
+              <CollectionCard
+                key={collection.id}
+                collection={collection}
+                index={index}
+                onPress={() => handleCollectionPress(collection)}
+                onDelete={() => handleDeleteCollection(collection.id)}
+              />
+            ))}
+            {collections.length <= 1 && renderEmptyHint()}
+          </>
+        )}
       </ScrollView>
 
       <AddCollectionModal

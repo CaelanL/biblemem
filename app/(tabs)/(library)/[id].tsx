@@ -1,18 +1,13 @@
 import { AppHeader } from '@/components/app-header';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { SwipeableVerseCard } from '@/components/library/SwipeableVerseCard';
+import { VerseCardSkeleton } from '@/components/library/VerseCardSkeleton';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
-import {
-  getCollections,
-  getVersesByCollection,
-  formatVerseReference,
-  type SavedVerse,
-  type Collection,
-} from '@/lib/storage';
-import { syncDeleteVerse } from '@/lib/sync';
+import { formatVerseReference, type SavedVerse } from '@/lib/storage';
+import { useAppStore, useVersesByCollection, useCollection, useHydrated } from '@/lib/store';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useCallback, useState } from 'react';
+import { useState } from 'react';
 import {
   Pressable,
   ScrollView,
@@ -21,38 +16,25 @@ import {
   View,
   RefreshControl,
 } from 'react-native';
-import { useFocusEffect } from '@react-navigation/native';
-import Animated, { FadeInDown } from 'react-native-reanimated';
 
 export default function CollectionScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
   const isDark = colorScheme === 'dark';
-  const [collection, setCollection] = useState<Collection | null>(null);
-  const [verses, setVerses] = useState<SavedVerse[]>([]);
+
+  // Store data
+  const collection = useCollection(id || '');
+  const verses = useVersesByCollection(id || '');
+  const hydrated = useHydrated();
+  const deleteVerse = useAppStore((s) => s.deleteVerse);
+  const refresh = useAppStore((s) => s.refresh);
+
   const [refreshing, setRefreshing] = useState(false);
-
-  const loadData = useCallback(async () => {
-    if (!id) return;
-
-    const colls = await getCollections();
-    const coll = colls.find((c) => c.id === id);
-    setCollection(coll || null);
-
-    const v = await getVersesByCollection(id);
-    setVerses(v.sort((a, b) => b.createdAt - a.createdAt));
-  }, [id]);
-
-  useFocusEffect(
-    useCallback(() => {
-      loadData();
-    }, [loadData])
-  );
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await loadData();
+    await refresh();
     setRefreshing(false);
   };
 
@@ -65,11 +47,13 @@ export default function CollectionScreen() {
   };
 
   const handleDeleteVerse = async (verseId: string) => {
-    await syncDeleteVerse(verseId);
-    await loadData();
+    await deleteVerse(verseId);
   };
 
   const primaryColor = isDark ? '#60a5fa' : '#0a7ea4';
+
+  // Sort verses by createdAt descending
+  const sortedVerses = [...verses].sort((a, b) => b.createdAt - a.createdAt);
 
   const renderEmptyState = () => (
     <View style={styles.emptyState}>
@@ -103,22 +87,28 @@ export default function CollectionScreen() {
 
       <ScrollView
         style={styles.scrollView}
-        contentContainerStyle={verses.length === 0 ? styles.emptyContainer : styles.versesContainer}
+        contentContainerStyle={!hydrated || sortedVerses.length === 0 ? styles.emptyContainer : styles.versesContainer}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.tint} />
         }
       >
-        {verses.length === 0
-          ? renderEmptyState()
-          : verses.map((v, i) => (
-              <SwipeableVerseCard
-                key={v.id}
-                verse={v}
-                index={i}
-                onPress={() => handleVersePress(v)}
-                onDelete={() => handleDeleteVerse(v.id)}
-              />
-            ))}
+        {!hydrated ? (
+          <View style={styles.skeletonContainer}>
+            <VerseCardSkeleton count={3} />
+          </View>
+        ) : sortedVerses.length === 0 ? (
+          renderEmptyState()
+        ) : (
+          sortedVerses.map((v, i) => (
+            <SwipeableVerseCard
+              key={v.id}
+              verse={v}
+              index={i}
+              onPress={() => handleVersePress(v)}
+              onDelete={() => handleDeleteVerse(v.id)}
+            />
+          ))
+        )}
       </ScrollView>
     </View>
   );
@@ -136,6 +126,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     paddingBottom: 100,
+  },
+  skeletonContainer: {
+    padding: 16,
   },
   versesContainer: {
     padding: 16,
