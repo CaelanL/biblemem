@@ -4,8 +4,8 @@ import { SwipeableCollectionCard } from '@/components/library/SwipeableCollectio
 import { CollectionCardSkeleton } from '@/components/library/CollectionCardSkeleton';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
-import { type Collection } from '@/lib/storage';
-import { useAppStore, useCollections, useHydrated, useCollectionVerseCount } from '@/lib/store';
+import { type Collection, MASTERED_COLLECTION_ID } from '@/lib/storage';
+import { useAppStore, useCollections, useHydrated, useCollectionVerseCount, useMasteredVerseCount } from '@/lib/store';
 import { router } from 'expo-router';
 import { useState } from 'react';
 import {
@@ -34,7 +34,11 @@ function CollectionCard({
   onPress: () => void;
   onDelete: () => void;
 }) {
-  const verseCount = useCollectionVerseCount(collection.id);
+  const isMastered = collection.id === MASTERED_COLLECTION_ID;
+  const collectionVerseCount = useCollectionVerseCount(collection.id);
+  const masteredVerseCount = useMasteredVerseCount();
+
+  const verseCount = isMastered ? masteredVerseCount : collectionVerseCount;
   const collectionWithCount: CollectionWithCount = { ...collection, verseCount };
 
   return (

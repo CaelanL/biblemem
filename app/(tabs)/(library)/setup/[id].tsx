@@ -1,11 +1,12 @@
 import { AppHeader } from '@/components/app-header';
 import { IconSymbol } from '@/components/ui/icon-symbol';
+import { PopoverMenu } from '@/components/ui/PopoverMenu';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { formatVerseReference, type SavedVerse } from '@/lib/storage';
 import { toSuperscript, getVerseText as extractVerseText } from '@/lib/study-chunks';
 import { getVerseText as fetchVerseText } from '@/lib/api/bible';
-import { useVerse } from '@/lib/store';
+import { useVerse, useAppStore } from '@/lib/store';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
 import {
@@ -16,6 +17,7 @@ import {
   ActivityIndicator,
   Modal,
   ScrollView,
+  Alert,
 } from 'react-native';
 import { BlurView } from 'expo-blur';
 import DropDownPicker from 'react-native-dropdown-picker';
@@ -30,6 +32,7 @@ export default function StudySetupScreen() {
 
   // Get verse from store (instant, no loading)
   const verse = useVerse(id || '');
+  const resetVerseProgress = useAppStore((s) => s.resetVerseProgress);
 
   const [verseText, setVerseText] = useState<string>('');
   const [textLoading, setTextLoading] = useState(false);
@@ -38,6 +41,7 @@ export default function StudySetupScreen() {
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [dropdownItems, setDropdownItems] = useState<{label: string; value: number}[]>([]);
   const [expanded, setExpanded] = useState(false);
+  const [menuVisible, setMenuVisible] = useState(false);
 
   // Calculate total verses in this passage
   const totalVerses = verse ? verse.verseEnd - verse.verseStart + 1 : 1;
@@ -78,6 +82,24 @@ export default function StudySetupScreen() {
     router.push(`/session?id=${id}&difficulty=${difficulty}&chunkSize=${chunkSize}`);
   };
 
+  const handleResetProgress = () => {
+    if (!verse || !id) return;
+
+    const isMastered = verse.progress?.hard?.completed === true;
+    const message = isMastered
+      ? 'This will clear all scores and remove this verse from your Mastered list.'
+      : 'This will clear all your scores for this verse.';
+
+    Alert.alert('Reset Progress?', message, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Reset',
+        style: 'destructive',
+        onPress: () => resetVerseProgress(id),
+      },
+    ]);
+  };
+
   const buttonBg = isDark ? '#3b82f6' : '#0a7ea4';
   const accentColor = isDark ? '#60a5fa' : colors.tint;
   const badgeBg = isDark ? 'rgba(96,165,250,0.15)' : 'rgba(10,126,164,0.1)';
@@ -111,7 +133,29 @@ export default function StudySetupScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
-      <AppHeader title="Setup" />
+      <AppHeader
+        title="Setup"
+        rightButton={{
+          label: '',
+          icon: 'ellipsis',
+          onPress: () => setMenuVisible(true),
+          variant: 'text',
+        }}
+      />
+
+      <PopoverMenu
+        visible={menuVisible}
+        onClose={() => setMenuVisible(false)}
+        anchorPosition={{ top: 105, right: 16 }}
+        items={[
+          {
+            label: 'Reset Progress',
+            icon: 'arrow.counterclockwise',
+            onPress: handleResetProgress,
+            destructive: true,
+          },
+        ]}
+      />
 
       <View style={styles.content}>
         {/* Verse Preview */}

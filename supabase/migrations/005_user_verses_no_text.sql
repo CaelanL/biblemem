@@ -6,5 +6,5 @@
 -- This enforces ESV/NLT licensing requirements.
 -- ============================================================================
 
--- Drop the text column entirely
-ALTER TABLE user_verses DROP COLUMN text;
+-- Drop the text column if it exists
+ALTER TABLE user_verses DROP COLUMN IF EXISTS text;

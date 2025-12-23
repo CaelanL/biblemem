@@ -27,10 +27,12 @@ export async function syncSaveVerse(
 }
 
 /**
- * Delete a verse (soft delete in Supabase)
+ * Delete a verse from a collection
+ * - Removes from junction table
+ * - If no collections left: soft delete if mastered, hard delete otherwise
  */
-export async function syncDeleteVerse(id: string): Promise<void> {
-  return deleteVerse(id);
+export async function syncDeleteVerse(id: string, collectionId: string): Promise<{ wasMastered: boolean }> {
+  return deleteVerse(id, collectionId);
 }
 
 /**

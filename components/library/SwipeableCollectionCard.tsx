@@ -45,8 +45,8 @@ export function SwipeableCollectionCard({
   const translateX = useSharedValue(0);
   const debouncedPress = useDebouncedPress(onPress);
 
-  // Don't allow swipe on default collection
-  const canDelete = !collection.isDefault;
+  // Don't allow swipe on default or virtual collections
+  const canDelete = !collection.isDefault && !collection.isVirtual;
 
   const panGesture = Gesture.Pan()
     .activeOffsetX([-10, 10])
@@ -124,7 +124,9 @@ export function SwipeableCollectionCard({
                   style={[
                     styles.iconContainer,
                     {
-                      backgroundColor: collection.isDefault
+                      backgroundColor: collection.iconColor
+                        ? `${collection.iconColor}20`
+                        : collection.isDefault
                         ? `${primaryColor}15`
                         : isDark
                         ? 'rgba(255,255,255,0.1)'
@@ -133,9 +135,9 @@ export function SwipeableCollectionCard({
                   ]}
                 >
                   <IconSymbol
-                    name={collection.isDefault ? 'heart.fill' : 'folder.fill'}
+                    name={collection.icon || (collection.isDefault ? 'heart.fill' : 'folder.fill')}
                     size={24}
-                    color={collection.isDefault ? primaryColor : colors.icon}
+                    color={collection.iconColor || (collection.isDefault ? primaryColor : colors.icon)}
                   />
                 </View>
                 <View style={styles.cardText}>

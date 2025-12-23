@@ -4,8 +4,8 @@ import { SwipeableVerseCard } from '@/components/library/SwipeableVerseCard';
 import { VerseCardSkeleton } from '@/components/library/VerseCardSkeleton';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
-import { formatVerseReference, type SavedVerse } from '@/lib/storage';
-import { useAppStore, useVersesByCollection, useCollection, useHydrated } from '@/lib/store';
+import { formatVerseReference, type SavedVerse, MASTERED_COLLECTION_ID } from '@/lib/storage';
+import { useAppStore, useVersesByCollection, useCollection, useHydrated, useMasteredVerses } from '@/lib/store';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
 import {
@@ -23,12 +23,19 @@ export default function CollectionScreen() {
   const colors = Colors[colorScheme ?? 'light'];
   const isDark = colorScheme === 'dark';
 
+  // Check if this is the Mastered collection
+  const isMasteredCollection = id === MASTERED_COLLECTION_ID;
+
   // Store data
   const collection = useCollection(id || '');
-  const verses = useVersesByCollection(id || '');
+  const collectionVerses = useVersesByCollection(id || '');
+  const masteredVerses = useMasteredVerses();
   const hydrated = useHydrated();
   const deleteVerse = useAppStore((s) => s.deleteVerse);
   const refresh = useAppStore((s) => s.refresh);
+
+  // Use mastered verses for the Mastered collection, otherwise use collection verses
+  const verses = isMasteredCollection ? masteredVerses : collectionVerses;
 
   const [refreshing, setRefreshing] = useState(false);
 
@@ -47,7 +54,8 @@ export default function CollectionScreen() {
   };
 
   const handleDeleteVerse = async (verseId: string) => {
-    await deleteVerse(verseId);
+    if (!id) return;
+    await deleteVerse(verseId, id);
   };
 
   const primaryColor = isDark ? '#60a5fa' : '#0a7ea4';
@@ -55,34 +63,56 @@ export default function CollectionScreen() {
   // Sort verses by createdAt descending
   const sortedVerses = [...verses].sort((a, b) => b.createdAt - a.createdAt);
 
-  const renderEmptyState = () => (
-    <View style={styles.emptyState}>
-      <View style={[styles.emptyIcon, { backgroundColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)' }]}>
-        <IconSymbol name="book.closed" size={40} color={colors.icon} />
+  const renderEmptyState = () => {
+    // Mastered collection empty state
+    if (isMasteredCollection) {
+      return (
+        <View style={styles.emptyState}>
+          <View style={[styles.emptyIcon, { backgroundColor: '#22c55e20' }]}>
+            <IconSymbol name="checkmark.circle.fill" size={40} color="#22c55e" />
+          </View>
+          <Text style={[styles.emptyTitle, { color: colors.text }]}>No mastered verses yet</Text>
+          <Text style={[styles.emptySubtitle, { color: colors.icon }]}>
+            Complete hard mode with 90%+ accuracy to master a verse
+          </Text>
+        </View>
+      );
+    }
+
+    // Regular collection empty state
+    return (
+      <View style={styles.emptyState}>
+        <View style={[styles.emptyIcon, { backgroundColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)' }]}>
+          <IconSymbol name="book.closed" size={40} color={colors.icon} />
+        </View>
+        <Text style={[styles.emptyTitle, { color: colors.text }]}>No verses yet</Text>
+        <Text style={[styles.emptySubtitle, { color: colors.icon }]}>
+          Add your first verse to start memorizing
+        </Text>
+        <Pressable
+          style={[styles.emptyButton, { backgroundColor: primaryColor }]}
+          onPress={handleAddVerse}
+        >
+          <IconSymbol name="plus" size={18} color="#fff" />
+          <Text style={styles.emptyButtonText}>Add Verse</Text>
+        </Pressable>
       </View>
-      <Text style={[styles.emptyTitle, { color: colors.text }]}>No verses yet</Text>
-      <Text style={[styles.emptySubtitle, { color: colors.icon }]}>
-        Add your first verse to start memorizing
-      </Text>
-      <Pressable
-        style={[styles.emptyButton, { backgroundColor: primaryColor }]}
-        onPress={handleAddVerse}
-      >
-        <IconSymbol name="plus" size={18} color="#fff" />
-        <Text style={styles.emptyButtonText}>Add Verse</Text>
-      </Pressable>
-    </View>
-  );
+    );
+  };
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <AppHeader
         title={collection?.name || 'Collection'}
-        rightButton={{
-          label: 'Add',
-          icon: 'plus',
-          onPress: handleAddVerse,
-        }}
+        rightButton={
+          collection?.isVirtual
+            ? undefined
+            : {
+                label: 'Add',
+                icon: 'plus',
+                onPress: handleAddVerse,
+              }
+        }
       />
 
       <ScrollView
@@ -106,6 +136,7 @@ export default function CollectionScreen() {
               index={i}
               onPress={() => handleVersePress(v)}
               onDelete={() => handleDeleteVerse(v.id)}
+              disableSwipe={isMasteredCollection}
             />
           ))
         )}
