@@ -6,7 +6,7 @@ import { useDebouncedPress } from '@/hooks/use-debounced-press';
 import { formatVerseReference, type SavedVerse, type Difficulty } from '@/lib/storage';
 import { getVerseText } from '@/lib/api/bible';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated, {
   FadeInDown,
   useSharedValue,
@@ -24,6 +24,7 @@ interface SwipeableVerseCardProps {
   index: number;
   onPress: () => void;
   onDelete: () => void;
+  disableSwipe?: boolean;
 }
 
 export function SwipeableVerseCard({
@@ -31,6 +32,7 @@ export function SwipeableVerseCard({
   index,
   onPress,
   onDelete,
+  disableSwipe = false,
 }: SwipeableVerseCardProps) {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
@@ -68,6 +70,7 @@ export function SwipeableVerseCard({
   const debouncedPress = useDebouncedPress(onPress);
 
   const panGesture = Gesture.Pan()
+    .enabled(!disableSwipe)
     .activeOffsetX([-10, 10])
     .failOffsetY([-5, 5])
     .onUpdate((e) => {
@@ -93,10 +96,35 @@ export function SwipeableVerseCard({
   }));
 
   const handleDelete = () => {
-    // Animate card out to the left
-    translateX.value = withTiming(-500, { duration: 200 }, () => {
-      runOnJS(onDelete)();
-    });
+    // Check if verse is mastered
+    const isMastered = verse.progress?.hard?.completed === true;
+
+    const title = isMastered ? 'Remove from collection?' : 'Delete verse?';
+    const message = isMastered
+      ? 'This verse will stay in your Mastered list.'
+      : "You'll lose all progress on this verse.";
+    const buttonText = isMastered ? 'Remove' : 'Delete';
+
+    Alert.alert(title, message, [
+      {
+        text: 'Cancel',
+        style: 'cancel',
+        onPress: () => {
+          // Close swipe
+          translateX.value = withSpring(0, { damping: 20 });
+        },
+      },
+      {
+        text: buttonText,
+        style: 'destructive',
+        onPress: () => {
+          // Animate card out to the left
+          translateX.value = withTiming(-500, { duration: 200 }, () => {
+            runOnJS(onDelete)();
+          });
+        },
+      },
+    ]);
   };
 
   const handlePress = () => {

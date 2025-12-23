@@ -5,9 +5,10 @@
 -- Max 500 verses per version (ESV/NLT licensing requirement).
 -- ============================================================================
 
--- Drop old cache tables
+-- Drop old cache tables (drop dependent views first)
+DROP VIEW IF EXISTS verse_cache_stats;
 DROP TABLE IF EXISTS chapter_cache;
-DROP TABLE IF EXISTS verse_cache;
+DROP TABLE IF EXISTS verse_cache CASCADE;
 
 -- New verse-level cache
 -- Each row = 1 verse (e.g., John 3:16)
