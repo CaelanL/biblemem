@@ -87,7 +87,6 @@ export async function fetchVerse(
   }
 
   // Fetch from API
-  console.log(`[BIBLE] Fetching verse: ${reference} (${version})`);
   const token = await getAuthToken();
   const baseUrl = getSupabaseUrl();
 
@@ -117,7 +116,6 @@ export async function fetchVerse(
   }
 
   const result = await response.json();
-  console.log(`[BIBLE] Fetched verse: ${reference} (${version}) - DB cached: ${result.cached}`);
 
   // Cache in session (if single verse, cache it; if range, cache each)
   if (parsed?.verse) {
@@ -182,7 +180,6 @@ export async function fetchChapter(
   }
 
   // Fetch from API
-  console.log(`[BIBLE] Fetching chapter: ${book} ${chapter} (${version})`);
   const token = await getAuthToken();
   const baseUrl = getSupabaseUrl();
 
@@ -214,7 +211,6 @@ export async function fetchChapter(
   }
 
   const result = await response.json();
-  console.log(`[BIBLE] Fetched chapter: ${book} ${chapter} (${version}) - DB cached: ${result.cached}, verses: ${Object.keys(result.verses || {}).length}`);
 
   // Cache in session
   if (result.verses) {
@@ -234,11 +230,8 @@ export async function fetchChapter(
  * @returns The verse text
  */
 export async function getVerseText(verse: SavedVerse): Promise<string> {
-  const ref = `${verse.book} ${verse.chapter}:${verse.verseStart}${verse.verseEnd !== verse.verseStart ? `-${verse.verseEnd}` : ''}`;
-
   // If text is already available, return it
   if (verse.text) {
-    console.log(`[BIBLE] getVerseText: ${ref} - has text inline`);
     return verse.text;
   }
 
@@ -251,7 +244,6 @@ export async function getVerseText(verse: SavedVerse): Promise<string> {
     verse.version
   );
   if (sessionCached) {
-    console.log(`[BIBLE] getVerseText: ${ref} - session cache hit`);
     return sessionCached;
   }
 
@@ -261,7 +253,6 @@ export async function getVerseText(verse: SavedVerse): Promise<string> {
       ? `${verse.book} ${verse.chapter}:${verse.verseStart}`
       : `${verse.book} ${verse.chapter}:${verse.verseStart}-${verse.verseEnd}`;
 
-  console.log(`[BIBLE] getVerseText: ${ref} - fetching from API`);
   // Fetch from API (which checks verse_cache internally, then external API)
   const result = await fetchVerse(reference, verse.version);
 

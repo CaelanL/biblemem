@@ -36,8 +36,10 @@ enabled = true
 file_size_limit = "10MB"
 
 # Edge Functions
+# verify_jwt = false because we use ES256 asymmetric keys (new JWT signing keys)
+# and handle verification ourselves in the function code
 [functions.bible]
-verify_jwt = true
+verify_jwt = false
 
 [functions.process-recording]
-verify_jwt = true
+verify_jwt = false
