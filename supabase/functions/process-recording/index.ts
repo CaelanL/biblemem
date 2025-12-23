@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.208.0/http/server.ts";
-import { getAuthUser } from "../_shared/auth.ts";
+import { verifyJwt } from "../_shared/auth.ts";
 import { handleCors } from "../_shared/cors.ts";
 import {
   badRequest,
@@ -8,8 +8,6 @@ import {
   unauthorized,
 } from "../_shared/errors.ts";
 import {
-  checkTranscriptionUsage,
-  rateLimitResponse,
   recordEvaluateUsage,
   recordTranscriptionUsage
 } from "../_shared/usage.ts";
@@ -21,6 +19,19 @@ interface ProcessingResult {
   transcription: string;
   cleanedTranscription: string;
   cleaningUsed: boolean;
+}
+
+interface TranscriptionTiming {
+  uploadMs: number;
+  jobMs: number;
+  pollMs: number;
+  fetchMs: number;
+  totalMs: number;
+}
+
+interface TranscriptionResult {
+  text: string;
+  timing: TranscriptionTiming;
 }
 
 serve(async (req) => {
@@ -35,8 +46,10 @@ serve(async (req) => {
     return badRequest("Method not allowed");
   }
 
-  // Authenticate user
-  const user = await getAuthUser(req);
+  // Authenticate user (local JWT verification - <1ms)
+  const authStart = Date.now();
+  const user = await verifyJwt(req);
+  const authMs = Date.now() - authStart;
   if (!user) {
     return unauthorized();
   }
@@ -70,24 +83,14 @@ serve(async (req) => {
       return badRequest("Invalid durationSeconds");
     }
 
-    // Check quotas
-    const quotaStart = Date.now();
-    const transcribeUsage = await checkTranscriptionUsage(user.id, durationSeconds);
-    if (!transcribeUsage.allowed) {
-      return rateLimitResponse(transcribeUsage.used, transcribeUsage.limit);
-    }
-
-    //const evaluateUsage = await checkEvaluateUsage(user.id);
-    //if (!evaluateUsage.allowed) {
-    //  return rateLimitResponse(evaluateUsage.used, evaluateUsage.limit);
-    //}
-    const quotaMs = Date.now() - quotaStart;
-
+    // Quota check removed - usage is still recorded for analytics
+    // Rate limiting can be re-enabled server-side without app update
     console.log(`[PROCESS] User: ${user.id.slice(0, 8)}..., Duration: ${durationSeconds}s, Size: ${(audioBlob.size / 1024).toFixed(1)}KB`);
-    console.log(`[PROCESS] Quota check: ${quotaMs}ms`);
 
     const transcribeStart = Date.now();
-    const transcription = await transcribeWithSoniox(audioBlob, actualVerse);
+    const transcriptionResult = await transcribeWithSoniox(audioBlob, actualVerse);
+    const transcription = transcriptionResult.text;
+    const transcribeTiming = transcriptionResult.timing;
     const transcribeMs = Date.now() - transcribeStart;
 
     const rawWordCount = transcription.split(/\s+/).filter(Boolean).length;
@@ -146,8 +149,15 @@ serve(async (req) => {
     }
 
     const totalMs = Date.now() - requestStart;
-    const dbOverhead = quotaMs + recordMs;
-    console.log(`[PROCESS] Complete - Total: ${totalMs}ms (Transcribe: ${transcribeMs}ms, DB: ${dbOverhead}ms)`);
+    const wordCount = cleanedTranscription.split(/\s+/).filter(Boolean).length;
+    const sizeKB = (audioBlob.size / 1024).toFixed(1);
+
+    // Comprehensive summary log
+    console.log(
+      `[PROCESS] ✓ ${totalMs}ms | ${durationSeconds}s recording (${sizeKB}KB) | ${wordCount} words\n` +
+      `         → Auth: ${authMs}ms | Upload: ${transcribeTiming.uploadMs}ms | Job: ${transcribeTiming.jobMs}ms | ` +
+      `Poll: ${transcribeTiming.pollMs}ms | Fetch: ${transcribeTiming.fetchMs}ms | Usage: ${recordMs}ms`
+    );
 
     return jsonResponse({
       transcription,
@@ -165,7 +175,7 @@ serve(async (req) => {
  * @param audioBlob - The audio file to transcribe
  * @param verseText - The expected verse text for context (improves accuracy)
  */
-async function transcribeWithSoniox(audioBlob: Blob, verseText: string): Promise<string> {
+async function transcribeWithSoniox(audioBlob: Blob, verseText: string): Promise<TranscriptionResult> {
   if (!SONIOX_API_KEY) {
     throw new Error("SONIOX_API_KEY not configured");
   }
@@ -266,6 +276,7 @@ async function transcribeWithSoniox(audioBlob: Blob, verseText: string): Promise
   console.log(`[PROCESS] Soniox polling complete: ${pollMs}ms (${attempts + 1} polls)`);
 
   // Step 4: Get transcript
+  const fetchStart = Date.now();
   const transcriptRes = await fetch(
     `https://api.soniox.com/v1/transcriptions/${transcriptionId}/transcript`,
     { headers: { Authorization: `Bearer ${SONIOX_API_KEY}` } }
@@ -276,7 +287,21 @@ async function transcribeWithSoniox(audioBlob: Blob, verseText: string): Promise
   }
 
   const { text } = await transcriptRes.json();
-  return text;
+  const fetchMs = Date.now() - fetchStart;
+  console.log(`[PROCESS] Soniox fetch transcript: ${fetchMs}ms`);
+
+  const totalMs = Date.now() - uploadStart;
+
+  return {
+    text,
+    timing: {
+      uploadMs,
+      jobMs,
+      pollMs,
+      fetchMs,
+      totalMs,
+    },
+  };
 }
 
 interface CleaningResult {

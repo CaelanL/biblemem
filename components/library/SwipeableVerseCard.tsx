@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { useDebouncedPress } from '@/hooks/use-debounced-press';
 import { formatVerseReference, type SavedVerse, type Difficulty } from '@/lib/storage';
 import { getVerseText } from '@/lib/api/bible';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
@@ -64,6 +65,7 @@ export function SwipeableVerseCard({
 
   const translateX = useSharedValue(0);
   const itemHeight = useSharedValue<number | null>(null);
+  const debouncedPress = useDebouncedPress(onPress);
 
   const panGesture = Gesture.Pan()
     .activeOffsetX([-10, 10])
@@ -102,7 +104,7 @@ export function SwipeableVerseCard({
     if (translateX.value < -10) {
       translateX.value = withSpring(0, { damping: 20 });
     } else {
-      onPress();
+      debouncedPress();
     }
   };
 
