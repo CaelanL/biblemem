@@ -720,3 +720,59 @@ export function useMasteredVerses() {
 export function useMasteredVerseCount() {
   return useAppStore((state) => state.masteredVerses.length);
 }
+
+/**
+ * Get insights stats: mastered count and in-progress count
+ */
+export function useInsightsStats() {
+  const verses = useAppStore(useShallow((state) => state.verses));
+  const masteredVerses = useAppStore(useShallow((state) => state.masteredVerses));
+
+  return useMemo(() => {
+    const versesMastered = masteredVerses.length;
+
+    // Get unique verse IDs that have any progress but aren't mastered
+    const masteredIds = new Set(masteredVerses.map((v) => v.id));
+    const inProgressVerses = verses.filter((v) => {
+      if (masteredIds.has(v.id)) return false;
+      const p = v.progress;
+      return (
+        p.easy?.bestAccuracy !== null ||
+        p.medium?.bestAccuracy !== null ||
+        p.hard?.bestAccuracy !== null
+      );
+    });
+
+    // Deduplicate by verse ID (verse may be in multiple collections)
+    const uniqueInProgress = new Set(inProgressVerses.map((v) => v.id));
+
+    return {
+      versesMastered,
+      inProgress: uniqueInProgress.size,
+    };
+  }, [verses, masteredVerses]);
+}
+
+/**
+ * Get most memorized books (books with most mastered verses)
+ */
+export function useMostMemorizedBooks() {
+  const masteredVerses = useAppStore(useShallow((state) => state.masteredVerses));
+
+  return useMemo(() => {
+    const bookCounts: Record<string, number> = {};
+
+    // Count mastered verses per book (deduplicate by ID first)
+    const seenIds = new Set<string>();
+    masteredVerses.forEach((v) => {
+      if (seenIds.has(v.id)) return;
+      seenIds.add(v.id);
+      bookCounts[v.book] = (bookCounts[v.book] || 0) + 1;
+    });
+
+    return Object.entries(bookCounts)
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 5);
+  }, [masteredVerses]);
+}

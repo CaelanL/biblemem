@@ -1,0 +1,120 @@
+import { IconSymbol } from '@/components/ui/icon-symbol';
+import { Colors } from '@/constants/theme';
+import { useColorScheme } from '@/hooks/use-color-scheme';
+import { useInsightsStats } from '@/lib/store';
+import { useRouter } from 'expo-router';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
+
+export function InsightsCard() {
+  const colorScheme = useColorScheme();
+  const colors = Colors[colorScheme ?? 'light'];
+  const isDark = colorScheme === 'dark';
+  const router = useRouter();
+
+  const stats = useInsightsStats();
+
+  // Streak is 0 for now (placeholder until we implement session tracking)
+  const streak = 0;
+  const streakIcon = streak > 0 ? 'flame.fill' : 'snowflake';
+  const streakColor = streak > 0 ? '#f97316' : '#60a5fa';
+  const streakBg = streak > 0 ? 'rgba(249,115,22,0.15)' : 'rgba(96,165,250,0.15)';
+
+  const cardBg = isDark ? '#1e1e1e' : '#f5f5f5';
+  const borderColor = isDark ? '#333' : '#e5e5e5';
+
+  return (
+    <Pressable
+      style={({ pressed }) => [
+        styles.card,
+        { backgroundColor: cardBg, borderColor },
+        pressed && styles.cardPressed,
+      ]}
+      onPress={() => router.push('/insights')}
+    >
+      <View style={styles.content}>
+        {/* Streak Icon */}
+        <View style={[styles.iconContainer, { backgroundColor: streakBg }]}>
+          <IconSymbol name={streakIcon as any} size={28} color={streakColor} />
+        </View>
+
+        {/* Stats */}
+        <View style={styles.statsContainer}>
+          <View style={styles.primaryStat}>
+            <Text style={[styles.streakValue, { color: colors.text }]}>{streak}</Text>
+            <Text style={[styles.streakLabel, { color: colors.icon }]}>day streak</Text>
+          </View>
+          <View style={styles.secondaryStats}>
+            <View style={styles.stat}>
+              <IconSymbol name="book.fill" size={14} color={colors.icon} />
+              <Text style={[styles.statText, { color: colors.icon }]}>
+                {stats.versesMastered} mastered
+              </Text>
+            </View>
+            <View style={styles.stat}>
+              <IconSymbol name="arrow.up.right" size={14} color={colors.icon} />
+              <Text style={[styles.statText, { color: colors.icon }]}>
+                {stats.inProgress} in progress
+              </Text>
+            </View>
+          </View>
+        </View>
+
+        {/* Chevron */}
+        <IconSymbol name="chevron.right" size={18} color={colors.icon} />
+      </View>
+    </Pressable>
+  );
+}
+
+const styles = StyleSheet.create({
+  card: {
+    borderRadius: 12,
+    borderWidth: 1,
+    overflow: 'hidden',
+  },
+  cardPressed: {
+    opacity: 0.8,
+    transform: [{ scale: 0.99 }],
+  },
+  content: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16,
+    gap: 14,
+  },
+  iconContainer: {
+    width: 56,
+    height: 56,
+    borderRadius: 14,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  statsContainer: {
+    flex: 1,
+    gap: 4,
+  },
+  primaryStat: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: 6,
+  },
+  streakValue: {
+    fontSize: 24,
+    fontWeight: '700',
+  },
+  streakLabel: {
+    fontSize: 14,
+  },
+  secondaryStats: {
+    flexDirection: 'row',
+    gap: 16,
+  },
+  stat: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+  },
+  statText: {
+    fontSize: 13,
+  },
+});
