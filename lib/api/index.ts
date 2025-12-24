@@ -8,3 +8,4 @@
 export { supabase, ensureAuth, getAuthToken } from "./client";
 export { fetchVerse, fetchVerses, fetchChapter, type BibleVersion, type BibleVerse, type ChapterResponse } from "./bible";
 export { processRecording, type ProcessRecordingResult } from "./recording";
+export { logSessionAttempt, getCurrentStreak, getTotalPracticeDays, type SessionAttemptData } from "./analytics";

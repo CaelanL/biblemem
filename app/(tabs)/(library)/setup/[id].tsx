@@ -45,15 +45,12 @@ export default function StudySetupScreen() {
 
   // Calculate total verses in this passage
   const totalVerses = verse ? verse.verseEnd - verse.verseStart + 1 : 1;
-  // Available chunk sizes (1, 2, 3... up to total verses, max 5)
-  const maxChunkSize = Math.min(totalVerses, 5);
 
   // Update dropdown items when verse loads
   useEffect(() => {
     if (verse) {
       const total = verse.verseEnd - verse.verseStart + 1;
-      const max = Math.min(total, 5);
-      const items = Array.from({ length: max }, (_, i) => ({
+      const items = Array.from({ length: total }, (_, i) => ({
         label: String(i + 1),
         value: i + 1,
       }));

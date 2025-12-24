@@ -1,5 +1,5 @@
 import { AppHeader } from '@/components/app-header';
-import { InsightsCard } from '@/components/home/InsightsCard';
+import { InsightsCard, type InsightsCardRef } from '@/components/home/InsightsCard';
 import { VOTMCard } from '@/components/home/VOTMCard';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors } from '@/constants/theme';
@@ -102,6 +102,7 @@ export default function HomeScreen() {
   // Refresh state
   const [refreshing, setRefreshing] = useState(false);
   const refresh = useAppStore((s) => s.refresh);
+  const insightsCardRef = useRef<InsightsCardRef>(null);
 
   // Check if user already has this verse in library
   const userHasVerse = useMemo(() => {
@@ -171,6 +172,7 @@ export default function HomeScreen() {
     await Promise.all([
       fetchVOTM(true),
       refresh(), // Refresh store data (collections, verses, mastered)
+      insightsCardRef.current?.refresh(), // Refresh streak
     ]);
     setRefreshing(false);
   };
@@ -273,7 +275,7 @@ export default function HomeScreen() {
         )}
 
         {/* Insights Section */}
-        <InsightsCard />
+        <InsightsCard ref={insightsCardRef} />
       </ScrollView>
 
       {/* Expanded Verse Modal */}

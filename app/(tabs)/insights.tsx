@@ -2,6 +2,7 @@ import { AppHeader } from '@/components/app-header';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { useStreak } from '@/hooks/use-streak';
 import { useInsightsStats, useMostMemorizedBooks } from '@/lib/store';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 
@@ -39,9 +40,7 @@ export default function InsightsScreen() {
 
   const stats = useInsightsStats();
   const topBooks = useMostMemorizedBooks();
-
-  // Streak is 0 for now (placeholder until we implement session tracking)
-  const streak = 0;
+  const { streak } = useStreak();
   const streakIcon = streak > 0 ? 'flame.fill' : 'snowflake';
   const streakColor = streak > 0 ? '#f97316' : '#60a5fa';
   const streakBg = streak > 0 ? 'rgba(249,115,22,0.15)' : 'rgba(96,165,250,0.15)';
