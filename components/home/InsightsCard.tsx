@@ -1,20 +1,28 @@
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { useStreak } from '@/hooks/use-streak';
 import { useInsightsStats } from '@/lib/store';
 import { useRouter } from 'expo-router';
+import { useImperativeHandle, forwardRef } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
-export function InsightsCard() {
+export interface InsightsCardRef {
+  refresh: () => Promise<void>;
+}
+
+export const InsightsCard = forwardRef<InsightsCardRef>(function InsightsCard(_, ref) {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
   const isDark = colorScheme === 'dark';
   const router = useRouter();
 
   const stats = useInsightsStats();
+  const { streak, refresh: refreshStreak } = useStreak();
 
-  // Streak is 0 for now (placeholder until we implement session tracking)
-  const streak = 0;
+  useImperativeHandle(ref, () => ({
+    refresh: refreshStreak,
+  }));
   const streakIcon = streak > 0 ? 'flame.fill' : 'snowflake';
   const streakColor = streak > 0 ? '#f97316' : '#60a5fa';
   const streakBg = streak > 0 ? 'rgba(249,115,22,0.15)' : 'rgba(96,165,250,0.15)';
@@ -64,7 +72,7 @@ export function InsightsCard() {
       </View>
     </Pressable>
   );
-}
+});
 
 const styles = StyleSheet.create({
   card: {

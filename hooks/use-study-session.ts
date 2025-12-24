@@ -19,7 +19,7 @@ import {
   calculateFinalScore,
   createResultsPageItem,
 } from '@/lib/study-chunks';
-import { processRecording as processRecordingApi } from '@/lib/api';
+import { processRecording as processRecordingApi, logSessionAttempt } from '@/lib/api';
 import { alignTranscription } from '@/lib/align';
 
 interface ChunkResult {
@@ -81,6 +81,7 @@ export function useStudySession({
   const [completedChunks, setCompletedChunks] = useState<Set<number>>(new Set());
   const [chunkResults, setChunkResults] = useState<Map<number, ChunkResult>>(new Map());
   const [showResults, setShowResults] = useState(false);
+  const [totalRecordingDurationMs, setTotalRecordingDurationMs] = useState(0);
 
   const flatListRef = useRef<FlatList>(null);
 
@@ -126,6 +127,10 @@ export function useStudySession({
     const currentChunk = chunks[currentIndex];
     const actualText = currentChunk.text;
 
+    // Track recording duration
+    const durationMs = Math.round(durationSeconds * 1000);
+    setTotalRecordingDurationMs((prev) => prev + durationMs);
+
     // Process recording: transcribe + clean in one call (or two for longer recordings)
     const { cleanedTranscription } = await processRecordingApi(uri, durationSeconds, actualText);
 
@@ -158,19 +163,33 @@ export function useStudySession({
       const finalScoreValue = calculateFinalScore(allAlignments);
 
       // Update progress in Zustand store (writes to Supabase + updates local state)
-      if (verseId && difficulty) {
+      if (verseId && difficulty && verse) {
         try {
           await useAppStore.getState().updateVerseProgress(verseId, difficulty as StorageDifficulty, finalScoreValue);
         } catch (e) {
           console.error('[STUDY] Failed to update progress:', e);
         }
+
+        // Log session attempt for analytics (fire-and-forget, don't block UI)
+        const sessionDurationMs = totalRecordingDurationMs + durationMs;
+        logSessionAttempt({
+          book: verse.book,
+          chapter: verse.chapter,
+          verseStart: verse.verseStart,
+          verseEnd: verse.verseEnd,
+          version: verse.version,
+          difficulty,
+          chunkSize,
+          accuracy: finalScoreValue,
+          recordingDurationMs: sessionDurationMs,
+        }).catch(e => console.error('[STUDY] Failed to log attempt:', e));
       }
 
       setShowResults(true);
     }
 
     return { score, alignment, allDone };
-  }, [chunks, currentIndex, completedChunks, chunkResults, verseId, difficulty]);
+  }, [chunks, currentIndex, completedChunks, chunkResults, verseId, difficulty, verse, chunkSize, totalRecordingDurationMs]);
 
   // Navigation actions
   const goToNext = useCallback(() => {
